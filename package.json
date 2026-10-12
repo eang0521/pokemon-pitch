@@ -1,0 +1,1 @@
+{ "name": "pokemon-soccer", "private": true, "type": "module", "scripts": { "fetch-data": "node tools/fetch-pokemon.mjs", "serve": "node tools/serve.mjs 8090" } }

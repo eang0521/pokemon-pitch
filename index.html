@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#161b22" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <title>Pokémon Pitch</title>
+  <meta name="description" content="Watch a fully simulated 7-a-side soccer match where every player is a Pokémon." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Oswald:wght@500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="css/style.css" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='46' fill='%23fff' stroke='%23222' stroke-width='8'/%3E%3Cpath d='M4 50a46 46 0 0 1 92 0z' fill='%23e53935' stroke='%23222' stroke-width='8'/%3E%3Ccircle cx='50' cy='50' r='13' fill='%23fff' stroke='%23222' stroke-width='8'/%3E%3C/svg%3E" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="ball-icon" aria-hidden="true"></span>
+      <div>
+        <h1>Pokémon Pitch</h1>
+        <p class="tag">7-a-side soccer simulation</p>
+      </div>
+    </div>
+    <nav class="modes" aria-label="Screens">
+      <button type="button" data-mode="setup">Play</button>
+      <button type="button" data-mode="guide">Cards</button>
+    </nav>
+  </header>
+
+  <!-- ============ SETUP ============ -->
+  <main id="setup" class="setup hidden">
+    <section class="setup-intro">
+      <h2>Pick your matchup</h2>
+      <p>The match engine is being built (milestone 2). In the meantime, the <a href="#cards" data-goto="guide">card guide</a> shows how every Pokémon rates at every position.</p>
+    </section>
+  </main>
+
+  <!-- ============ CARD GUIDE ============ -->
+  <main id="guide" class="setup guide hidden">
+    <section class="setup-intro">
+      <h2>How cards work</h2>
+      <p>Every card is a <b>Pokémon at a position</b>: Lucario GK, Lucario DEF, Lucario MID and Lucario FWD are four different cards. A card's ratings come from the Pokémon's six base stats, and each stat means something different at each position.</p>
+    </section>
+    <div class="team-tabs" id="guide-pos" role="tablist" aria-label="Positions"></div>
+    <div class="g-cols">
+      <section class="g-box" id="guide-table"></section>
+      <section class="g-box g-notes">
+        <div id="guide-formula"></div>
+        <div id="guide-roster"></div>
+      </section>
+    </div>
+    <details class="g-box g-allpos">
+      <summary>All positions at a glance</summary>
+      <div class="g-scroll" id="guide-all"></div>
+    </details>
+    <section class="g-box g-browser">
+      <div class="b-browser-head">
+        <h3><span id="g-title">Cards</span> <span class="muted small" id="g-count"></span></h3>
+        <div class="b-filters">
+          <input id="g-search" type="search" placeholder="Search Pokémon, type or dex #…" aria-label="Search" />
+          <select id="g-sort" aria-label="Sort"></select>
+        </div>
+        <p class="b-legend">Tap a card to compare that Pokémon at every position.</p>
+      </div>
+      <div id="g-list" class="b-list g-list"></div>
+    </section>
+  </main>
+
+  <footer class="foot">
+    Sprites from <a href="https://pokemondb.net/sprites" target="_blank" rel="noopener">pokemondb.net</a>. Pokémon © Nintendo / Game Freak / The Pokémon Company. A fan project, not affiliated with them.
+  </footer>
+
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>
