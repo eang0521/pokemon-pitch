@@ -54,7 +54,7 @@ export const TUNE = {
   gkDive: 0.6, gkDivePer: 0.008, // extra reach at full stretch of a dive = base + reflexes * per
   gkDiveTime: 0.45, // seconds from the start of a dive to full stretch
   gkTop: 1.55, gkTopPer: 0.011, // highest point they can get a hand to
-  gkReact: 0.37, gkReactPer: 0.0018, // reaction time = base - reflexes * per
+  gkReact: 0.33, gkReactPer: 0.0018, // reaction time = base - reflexes * per
   gkDiveSpd: 2.0, gkDiveSpdPer: 0.03,
   gkHold: 0.25, gkHoldPer: 0.0075, // chance to hold a shot = base + handling * per - speed penalty
 };

@@ -1,4 +1,5 @@
-// The 8 regional AI teams (13-card rosters).
+// The 8 regional AI teams (13-card rosters), hand-picked from each region's Pokédex
+// (no legendaries or mythicals), each with a coach whose style suits the squad.
 // Rosters use the card format from js/roster.js: 'slug', or 'slug:POS' for FLEX / SUB slots.
 // The FLEX sets the formation: DEF = 3-2-1, MID = 2-3-1, FWD = 2-2-2.
 import { coach } from './coaches.js';
@@ -9,48 +10,72 @@ export const TEAMS = [
     id: 'kanto', city: 'Kanto', name: 'Kings', abbr: 'KAN',
     colors: { primary: '#c62828', secondary: '#f9c74f' },
     coach: coach('Coach Oak', 'balanced'),
-    roster: {GK: 'moltres', DEF1: 'dragonite', DEF2: 'mew', MID1: 'zapdos', MID2: 'exeggutor', FWD: 'arcanine', FLEX: 'vaporeon:MID', bGK: 'jolteon', bDEF: 'articuno', bMID: 'lapras', bFWD: 'magmar', SUB1: 'vileplume:MID', SUB2: 'gyarados:DEF'},
+    roster: {
+      GK: 'starmie', DEF1: 'gyarados', DEF2: 'machamp', MID1: 'vaporeon', MID2: 'exeggutor', FWD: 'charizard', FLEX: 'dragonite:MID',
+      bGK: 'cloyster', bDEF: 'blastoise', bMID: 'venusaur', bFWD: 'jolteon', SUB1: 'arcanine:FWD', SUB2: 'scyther:DEF',
+    },
   },
   {
     id: 'johto', city: 'Johto', name: 'Jets', abbr: 'JOH',
     colors: { primary: '#1e88e5', secondary: '#cfd8dc' },
-    coach: coach('Coach Elm', 'counter'),
-    roster: {GK: 'raikou', DEF1: 'tyranitar', DEF2: 'celebi', MID1: 'suicune', MID2: 'ampharos', FWD: 'entei', FLEX: 'espeon:FWD', bGK: 'crobat', bDEF: 'feraligatr', bMID: 'porygon2', bFWD: 'houndoom', SUB1: 'politoed:MID', SUB2: 'umbreon:DEF'},
+    coach: coach('Coach Elm', 'longBall'),
+    roster: {
+      GK: 'crobat', DEF1: 'tyranitar', DEF2: 'scizor', MID1: 'espeon', MID2: 'ampharos', FWD: 'typhlosion', FLEX: 'houndoom:FWD',
+      bGK: 'xatu', bDEF: 'heracross', bMID: 'kingdra', bFWD: 'feraligatr', SUB1: 'umbreon:DEF', SUB2: 'meganium:MID',
+    },
   },
   {
     id: 'hoenn', city: 'Hoenn', name: 'Hurricanes', abbr: 'HOE',
     colors: { primary: '#00897b', secondary: '#1a237e' },
     coach: coach('Coach Birch', 'wingPlay'),
-    roster: {GK: 'latios', DEF1: 'metagross', DEF2: 'registeel', MID1: 'latias', MID2: 'regice', FWD: 'deoxys', FLEX: 'gardevoir:MID', bGK: 'sceptile', bDEF: 'jirachi', bMID: 'salamence', bFWD: 'blaziken', SUB1: 'walrein:MID', SUB2: 'regirock:DEF'},
+    roster: {
+      GK: 'milotic', DEF1: 'metagross', DEF2: 'swampert', MID1: 'gardevoir', MID2: 'walrein', FWD: 'salamence', FLEX: 'blaziken:MID',
+      bGK: 'claydol', bDEF: 'aggron', bMID: 'ludicolo', bFWD: 'sceptile', SUB1: 'flygon:FWD', SUB2: 'manectric:FWD',
+    },
   },
   {
     id: 'sinnoh', city: 'Sinnoh', name: 'Blizzard', abbr: 'SIN',
     colors: { primary: '#263238', secondary: '#81d4fa' },
     coach: coach('Coach Rowan', 'parkBus'),
-    roster: {GK: 'darkrai', DEF1: 'garchomp', DEF2: 'uxie', MID1: 'heatran', MID2: 'togekiss', FWD: 'azelf', FLEX: 'mesprit:DEF', bGK: 'infernape', bDEF: 'manaphy', bMID: 'magnezone', bFWD: 'magmortar', SUB1: 'glaceon:MID', SUB2: 'shaymin:DEF'},
+    roster: {
+      GK: 'glaceon', DEF1: 'garchomp', DEF2: 'dusknoir', MID1: 'togekiss', MID2: 'magnezone', FWD: 'lucario', FLEX: 'gallade:DEF',
+      bGK: 'yanmega', bDEF: 'weavile', bMID: 'roserade', bFWD: 'infernape', SUB1: 'electivire:FWD', SUB2: 'empoleon:MID',
+    },
   },
   {
     id: 'unova', city: 'Unova', name: 'Volts', abbr: 'UNO',
     colors: { primary: '#fdd835', secondary: '#212121' },
-    coach: coach('Coach Juniper', 'highPress'),
-    roster: {GK: 'hydreigon', DEF1: 'victini', DEF2: 'terrakion', MID1: 'meloetta', MID2: 'keldeo', FWD: 'genesect', FLEX: 'tornadus:FWD', bGK: 'cobalion', bDEF: 'virizion', bMID: 'vanilluxe', bFWD: 'thundurus', SUB1: 'landorus:MID', SUB2: 'haxorus:DEF'},
+    coach: { ...coach('Coach Juniper', 'highPress'), press: 0.72 },
+    roster: {
+      GK: 'chandelure', DEF1: 'haxorus', DEF2: 'krookodile', MID1: 'volcarona', MID2: 'reuniclus', FWD: 'hydreigon', FLEX: 'zoroark:FWD',
+      bGK: 'vanilluxe', bDEF: 'excadrill', bMID: 'samurott', bFWD: 'mienshao', SUB1: 'eelektross:MID', SUB2: 'serperior:DEF',
+    },
   },
   {
     id: 'kalos', city: 'Kalos', name: 'Royals', abbr: 'KAL',
     colors: { primary: '#6a1b9a', secondary: '#f48fb1' },
     coach: coach('Coach Sycamore', 'possession'),
-    roster: {GK: 'zygarde', DEF1: 'diancie', DEF2: 'goodra', MID1: 'hoopa', MID2: 'volcanion', FWD: 'delphox', FLEX: 'florges:MID', bGK: 'noivern', bDEF: 'chesnaught', bMID: 'sylveon', bFWD: 'greninja', SUB1: 'gogoat:MID', SUB2: 'aegislash:DEF'},
+    roster: {
+      GK: 'delphox', DEF1: 'goodra', DEF2: 'chesnaught', MID1: 'florges', MID2: 'sylveon', FWD: 'greninja', FLEX: 'noivern:MID',
+      bGK: 'hawlucha', bDEF: 'aegislash', bMID: 'gogoat', bFWD: 'pyroar', SUB1: 'talonflame:FWD', SUB2: 'tyrantrum:DEF',
+    },
   },
   {
     id: 'alola', city: 'Alola', name: 'Tides', abbr: 'ALO',
     colors: { primary: '#ef6c00', secondary: '#4dd0e1' },
-    coach: coach('Coach Kukui', 'counter'),
-    roster: {GK: 'zeraora', DEF1: 'kommo-o', DEF2: 'marshadow', MID1: 'magearna', MID2: 'nihilego', FWD: 'pheromosa', FLEX: 'blacephalon:FWD', bGK: 'naganadel', bDEF: 'tapu-bulu', bMID: 'necrozma', bFWD: 'tapu-lele', SUB1: 'primarina:MID', SUB2: 'melmetal:DEF'},
+    coach: { ...coach('Coach Kukui', 'balanced'), style: 'Island Style', tempo: 0.6, width: 0.6 },
+    roster: {
+      GK: 'salazzle', DEF1: 'golisopod', DEF2: 'tsareena', MID1: 'primarina', MID2: 'drampa', FWD: 'kommo-o', FLEX: 'decidueye:FWD',
+      bGK: 'ribombee', bDEF: 'dhelmise', bMID: 'vikavolt', bFWD: 'lycanroc', SUB1: 'incineroar:DEF', SUB2: 'mimikyu:MID',
+    },
   },
   {
     id: 'galar', city: 'Galar', name: 'Gales', abbr: 'GAL',
     colors: { primary: '#8e1b3a', secondary: '#ffca28' },
-    coach: coach('Coach Magnolia', 'longBall'),
-    roster: {GK: 'dragapult', DEF1: 'zarude', DEF2: 'glastrier', MID1: 'cursola', MID2: 'spectrier', FWD: 'enamorus', FLEX: 'ursaluna:DEF', bGK: 'inteleon', bDEF: 'urshifu', bMID: 'polteageist', bFWD: 'toxtricity', SUB1: 'hatterene:MID', SUB2: 'rillaboom:DEF'},
+    coach: { ...coach('Coach Leon', 'balanced'), style: 'Champion Time', tempo: 0.65, width: 0.6, shootRange: 0.6 },
+    roster: {
+      GK: 'duraludon', DEF1: 'sirfetchd', DEF2: 'rillaboom', MID1: 'inteleon', MID2: 'hatterene', FWD: 'dragapult', FLEX: 'polteageist:MID',
+      bGK: 'boltund', bDEF: 'obstagoon', bMID: 'mr-rime', bFWD: 'cinderace', SUB1: 'toxtricity:FWD', SUB2: 'grimmsnarl:DEF',
+    },
   },
 ];

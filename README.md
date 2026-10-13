@@ -2,7 +2,7 @@
 
 A static, browser-only 7-a-side soccer simulation where every player is a Pokémon card. It's a sibling of Pokémon Gridiron (the football sim) and shares its architecture and look: vanilla ES modules, no build step, no backend, hosted on GitHub Pages.
 
-> **Status: milestone 4 of 6.** Cards, the match engine, the match screen, coach AI, fatigue and substitutions, type synergies, injuries, shootouts and the stats tabs are done. The 8 regional teams (hand-picked), team picker, team builder and share codes are next. Until then the regional teams are provisional, auto-built from each region's Pokédex.
+> **Status: milestone 5 of 6.** Cards, the match engine and screen, coach AI, fatigue and substitutions, synergies, shootouts, the 8 regional teams, the team picker, the team builder and share codes are done. A balance pass and polish are next.
 
 ## Cards
 Every card is a **Pokémon at a position**: Lucario GK and Lucario FWD are different cards. All 1,025 Pokémon can play all 4 positions. A card's ratings come from the Pokémon's six base stats, and each stat means something different at each position:
@@ -20,6 +20,33 @@ Every card is a **Pokémon at a position**: Lucario GK and Lucario FWD are diffe
 - **OVR** is a weighted average of the traits that matter at the position (`OVR_WEIGHTS` in `js/ratings.js`). No single stat carries more than 30% of any position's OVR.
 
 The **Cards** screen explains every stat at every position, shows how OVR is weighted, and lets you look up any Pokémon at all four positions.
+
+## Teams
+Eight regional AI teams, each hand-picked from its region's Pokédex (no legendaries or mythicals) with a coach whose style suits the squad:
+
+| Team | Coach | Style | Formation | Stars |
+|---|---|---|---|---|
+| Kanto Kings | Oak | Balanced | 2-3-1 | Dragonite, Charizard, Gyarados, Starmie in goal |
+| Johto Jets | Elm | Long Ball | 2-2-2 | Tyranitar, Espeon, Typhlosion, Crobat in goal |
+| Hoenn Hurricanes | Birch | Wing Play | 2-3-1 | Metagross, Salamence, Gardevoir, Milotic in goal |
+| Sinnoh Blizzard | Rowan | Park the Bus | 3-2-1 | Garchomp, Dusknoir, Lucario, Glaceon in goal |
+| Unova Volts | Juniper | High Press | 2-2-2 | Hydreigon, Volcarona, Zoroark, Chandelure in goal |
+| Kalos Royals | Sycamore | Possession | 2-3-1 | Goodra, Florges, Greninja, Delphox in goal |
+| Alola Tides | Kukui | Island Style | 2-2-2 | Kommo-o, Primarina, Decidueye, Salazzle in goal |
+| Galar Gales | Leon | Champion Time | 2-3-1 | Dragapult, Inteleon, Hatterene, Duraludon in goal |
+
+`node tools/league.mjs 6` plays a full home-and-away league six times over. Seven teams finish within about 25 points of each other; Alola (the weakest region) is the underdog.
+
+## Building your own team
+**＋ Build a team** opens the builder. Pick a card for each of the 13 slots from all 1,025 Pokémon. You can:
+- search by name, type or Pokédex number, and sort by OVR, base stat total, height, weight or any stat (labelled with what it means at that position);
+- cap the base stat total to keep legendaries out;
+- choose the FLEX position (which sets the formation) and the subs' positions;
+- set the team's city, name, abbreviation, colours and coach (name, preset, and all six tendencies);
+- see the formation, the starting seven's average OVR and their synergies as you go;
+- **Auto-fill** the empty slots with the best available cards.
+
+Custom teams are saved in your browser (with a clear message if storage is full or blocked) and appear under **Custom teams** on the matchup screen, with an **Edit** button. **Share code** turns a team into a short code and a link. Anyone can paste the code into **Import a team code**, and opening a `?team=CODE` link imports it. Matches involving custom teams get shareable links too (`?home=~CODE&away=kanto&seed=42`), which work even for people who don't have the team saved.
 
 ## Rosters
 - **Starters (7):** GK, DEF, DEF, MID, MID, FWD, FLEX. The FLEX (DEF, MID or FWD) sets the formation: DEF → **3-2-1**, MID → **2-3-1**, FWD → **2-2-2**.
@@ -49,19 +76,19 @@ A match is two 10-minute halves on a 60 × 40 m pitch with 5 × 2 m goals and 9 
 - **Keepers** position on the line from ball to goal and come out to narrow the angle. On a shot they react (Reflexes), then move and dive, with reach from height and a dive that stretches over time. Handling decides catch or parry, and a parry can be tipped behind for a corner. They also claim crosses (Composure) and distribute by hand or foot.
 - **Every event is logged** for the play-by-play: passes, shots, saves, tackles, interceptions, fouls, cards, set pieces and goals. The match also keeps team and player stats (possession, shots, on target, xG, passes and completion, tackles, saves, fouls, cards, corners).
 
-Tuning constants live in `TUNE` in `js/sim/matchSim.js`. The xG model is fitted to the sim's own shots with `tools/xg-fit.mjs`. Current league averages (40 matches, `node tools/sim-test.mjs 40`):
+Tuning constants live in `TUNE` in `js/sim/matchSim.js`. The xG model is fitted to the sim's own shots with `tools/xg-fit.mjs`. Current league averages (48 matches, `node tools/sim-test.mjs 48`):
 
 | | per match |
 |---|---|
-| Goals | 6.3 (xG 5.2) |
-| Shots / on target | 41 / 53% |
-| Save % | 74% |
-| Passes / completion | 202 / 79% |
-| Fouls / yellow / red | 10 / 1.6 / 0.1 |
-| Penalties | 0.2 (75% scored) |
-| Corners | 4.3 |
+| Goals | 5.9 (xG 5.4) |
+| Shots / on target | 41 / 50% |
+| Save % | 73% |
+| Passes / completion | 187 / 79% |
+| Fouls / yellow / red | 11 / 1.8 / 0.3 |
+| Penalties | 0.4 |
+| Corners | 4.2 |
 | Substitutions | about 6 per team (rolling) |
-| Home / draw / away | 45% / 15% / 40% |
+| Home / draw / away | 48% / 25% / 27% |
 
 ## Fatigue and substitutions
 HP is stamina. Energy drains every step, more the closer a player runs to top speed, and stamina stretches it (a keeper barely tires). Below 75% energy, ratings fade (down to 82% of normal at 45% energy). Everyone gets a little back at half time.
@@ -128,7 +155,9 @@ js/depth.js           a team in a match: cards, slots on the pitch, energy, subs
 js/coach.js           in-game coaching: score/clock adjustments and learning what works
 js/synergy.js         type synergy definitions, tiers and tuned magnitudes
 js/rating.js          player match ratings
-js/data/teams.js      the 8 regional AI teams (generated by tools/build-teams.mjs for now)
+js/data/teams.js      the 8 regional AI teams
+js/builder.js         team builder
+js/teamcode.js        team share codes
 js/data/coaches.js    coach tendency presets
 js/ratings.js         cards: base stats -> position traits, OVR
 js/roster.js          roster slots, FLEX formation, validation
@@ -166,7 +195,7 @@ node tools/random-rosters.mjs 30  # random teams from the whole Pokédex: crashe
 node tools/fatigue-report.mjs 12  # energy at full time by position and stamina, subs, injuries
 node tools/synergy-calibrate.mjs 160 all 2   # win-rate edge of every type synergy (all CPU cores)
 node tools/coach-test.mjs 200     # adapting vs frozen coaches: comebacks, late shots, preset records
-node tools/build-teams.mjs        # regenerate the provisional regional teams
+node tools/league.mjs 6            # full home-and-away league, 6 times over: standings, shots, xG
 node tools/ratings-report.mjs 8   # OVR spread per position, stat weights, top cards
 node tools/fetch-pokemon.mjs      # refresh the card database from pokemondb.net
 ```

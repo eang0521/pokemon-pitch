@@ -564,3 +564,7 @@ tr.potm-row td { background: rgba(255, 203, 5, .07); }
 .pbp-item.card .txt { color: #ffa198; font-weight: 600; }
 .pbp-item.sub .txt { font-size: 12px; }
 .team-card .sets { min-height: 22px; flex-direction: row; flex-wrap: wrap; gap: 0; align-items: center; }
+.team-card.incomplete { opacity: .75; }
+.team-card.incomplete .pick::after { content: 'Unfinished — tap to finish it'; color: var(--bad); }
+.cs input[type=text] { grid-column: 2 / -1; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 4px 7px; }
+.coach-ctl p { margin: 4px 0 0; }

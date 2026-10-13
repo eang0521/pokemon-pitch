@@ -4,32 +4,47 @@ import { POKEMON } from './data/pokemon.js';
 import { renderGuide, wireGuide, statBars } from './guide.js';
 import { MatchView, EngineClient, recFrames } from './client.js';
 import { PitchRenderer, kitsFor } from './render.js';
-import { parseCard, formationOf } from './roster.js';
+import { parseCard, formationOf, validateRoster } from './roster.js';
 import { POS_NAMES } from './ratings.js';
 import { HALF_SECS } from './sim/pitch.js';
 import { $, $$, esc, typeChips, spriteUrl, synergyChips } from './ui.js';
 import { matchRating } from './rating.js';
 import { teamSynergies } from './synergy.js';
 import { fatigueMult } from './depth.js';
-import { settings } from './storage.js';
+import { settings, loadCustomTeams, saveCustomTeam, storageErrorText, lastStorageError } from './storage.js';
+import { openBuilder, wireBuilder } from './builder.js';
+import { encodeTeam, decodeTeam } from './teamcode.js';
+import { openModal, closeModal } from './modal.js';
 
 const PLAYBACK = 3; // 1× speed = three seconds of match time per real second (a match takes ~7 minutes)
-const allTeams = () => TEAMS;
-const findTeam = (id) => allTeams().find((t) => t.id === id);
+const allTeams = () => [...loadCustomTeams(), ...TEAMS];
+// teams embedded in shared match links ("~CODE") are decoded on the fly (not saved)
+const linkTeams = new Map();
+const findTeam = (id) => {
+  if (!id) return null;
+  if (id.startsWith('~')) {
+    if (!linkTeams.has(id)) { const { team, errors } = decodeTeam(id); linkTeams.set(id, team && !errors.length ? { ...team, id, linked: true } : null); }
+    return linkTeams.get(id);
+  }
+  return allTeams().find((t) => t.id === id);
+};
+// id to put in a shareable match URL: custom teams travel as their code
+const urlId = (t) => (t.custom ? `~${encodeTeam(t)}` : t.id);
 const clockText = (s) => { s = Math.max(0, Math.floor(s)); return `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`; };
 const elapsedOf = (l) => (l.half - 1) * HALF_SECS + l.clock;
 
 // ==========================================================================
 // Screens
-const SCREENS = ['setup', 'guide', 'game'];
+const SCREENS = ['setup', 'guide', 'game', 'builder'];
 function showScreen(name) {
   if (!SCREENS.includes(name)) name = 'setup';
   for (const id of SCREENS) $(`#${id}`).classList.toggle('hidden', id !== name);
   $$('.modes [data-mode]').forEach((b) => b.classList.toggle('on', b.dataset.mode === name || (name === 'game' && b.dataset.mode === 'setup')));
-  $('#btn-new').classList.toggle('hidden', name !== 'game');
+  $('#btn-new').classList.toggle('hidden', name !== 'game' && name !== 'builder');
+  $('#btn-new').innerHTML = name === 'builder' ? '<span class="l-long">Back to teams</span><span class="l-short">‹ Teams</span>' : '<span class="l-long">New match</span><span class="l-short">New</span>';
   if (name === 'guide') renderGuide();
   if (name !== 'game') { setPlaying(false); setTheater(false); }
-  if (name !== 'game') settings.set('screen', name);
+  if (name !== 'game' && name !== 'builder') settings.set('screen', name);
   window.scrollTo(0, 0);
 }
 $$('.modes [data-mode]').forEach((b) => b.addEventListener('click', () => {
@@ -48,39 +63,90 @@ $('#btn-new').addEventListener('click', () => {
 // ==========================================================================
 // Setup
 const sel = { home: null, away: null };
+let teamTab = settings.get('teamTab', 'regional');
+const tabTeams = (tab) => (tab === 'custom' ? loadCustomTeams() : TEAMS);
+$$('.team-tabs [data-ttab]').forEach((b) => b.addEventListener('click', () => { teamTab = b.dataset.ttab; settings.set('teamTab', teamTab); renderTeamGrid(); }));
 function renderTeamGrid() {
+  if (!['regional', 'custom'].includes(teamTab)) teamTab = 'regional';
+  $$('.team-tabs [data-ttab]').forEach((b) => {
+    b.classList.toggle('on', b.dataset.ttab === teamTab);
+    b.setAttribute('aria-selected', b.dataset.ttab === teamTab);
+    b.querySelector('.n').textContent = tabTeams(b.dataset.ttab).length;
+  });
   const grid = $('#team-grid');
-  grid.innerHTML = allTeams().map(teamCardHtml).join('');
+  const teams = tabTeams(teamTab);
+  if (teamTab === 'custom' && !teams.length) {
+    grid.innerHTML = `<div class="grid-empty"><p>You haven't made any teams yet. Build one from any of the 1,025 Pokémon, or import a code a friend shared.</p><div class="build-row"><button type="button" class="primary" data-build>＋ Build a team</button><button type="button" data-import>Import a team code</button></div></div>`;
+    grid.querySelector('[data-build]').onclick = () => editTeam(null);
+    grid.querySelector('[data-import]').onclick = () => importDialog();
+  } else grid.innerHTML = teams.map(teamCardHtml).join('');
   grid.querySelectorAll('.team-card').forEach((el) => {
-    el.addEventListener('click', () => pickTeam(el.dataset.team));
+    el.addEventListener('click', (e) => { if (e.target.closest('[data-edit]')) return; pickTeam(el.dataset.team); });
     el.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pickTeam(el.dataset.team); } });
   });
+  grid.querySelectorAll('[data-edit]').forEach((b) => b.addEventListener('click', () => editTeam(findTeam(b.dataset.edit))));
   syncSetup();
 }
+function editTeam(team) {
+  showScreen('builder');
+  openBuilder(team, {
+    onSave: (t) => { teamTab = 'custom'; settings.set('teamTab', teamTab); showScreen('setup'); renderTeamGrid(); },
+    onClose: (deleted) => {
+      if (deleted) { for (const k of ['home', 'away']) if (!findTeam(sel[k])) sel[k] = null; }
+      showScreen('setup'); renderTeamGrid();
+    },
+  });
+}
+$('#btn-build').addEventListener('click', () => editTeam(null));
+function importDialog(prefill = '') {
+  openModal(`<h3>Import a team</h3>
+    <p class="muted small">Paste a team code (or a link someone shared).</p>
+    <textarea class="code" id="m-code" rows="4" placeholder="PS1...">${esc(prefill)}</textarea>
+    <div id="m-msg" class="small"></div>
+    <div class="modal-actions"><button type="button" class="primary" id="m-import">Import</button><button type="button" class="ghost" data-close>Cancel</button></div>`, (d) => {
+    d.querySelector('#m-import').onclick = () => {
+      const { team, errors } = decodeTeam(d.querySelector('#m-code').value);
+      const msg = d.querySelector('#m-msg');
+      if (!team) { msg.innerHTML = `<span class="b-errors">${esc(errors[0])}</span>`; return; }
+      if (!saveCustomTeam(team)) { msg.innerHTML = `<span class="b-errors">${esc(storageErrorText(lastStorageError()))}</span>`; return; }
+      teamTab = 'custom'; settings.set('teamTab', teamTab);
+      renderTeamGrid();
+      if (errors.length) { msg.innerHTML = `<span class="b-errors">Imported, but the roster needs work: ${esc(errors.slice(0, 2).join('; '))}. Open it in the builder to finish it.</span>`; return; }
+      if (!sel.home) sel.home = team.id; else if (!sel.away && sel.home !== team.id) sel.away = team.id;
+      syncSetup();
+      closeModal();
+    };
+  });
+}
+$('#btn-import').addEventListener('click', () => importDialog());
 function teamCardHtml(t) {
   const stars = ['FWD', 'FLEX', 'MID1'].map((k) => POKEMON[parseCard(t.roster[k], k)?.mon]).filter(Boolean);
+  const bad = validateRoster(t.roster).length > 0;
   const c = t.coach;
   const meter = (label, v) => `<span>${label}</span><div class="meter"><span style="width:${Math.round(v * 100)}%"></span></div>`;
-  return `<div class="team-card" data-team="${t.id}" role="button" tabindex="0">
+  return `<div class="team-card${bad ? ' incomplete' : ''}" data-team="${t.id}" role="button" tabindex="0">
     <div class="band" style="background:linear-gradient(120deg, ${t.colors.primary}, ${t.colors.primary} 60%, ${t.colors.secondary})">
       ${stars.map((p) => `<img src="${spriteUrl(p)}" alt="${esc(p.name)}" loading="lazy" referrerpolicy="no-referrer">`).join('')}
       <span class="abbr">${esc(t.abbr)}</span>
+      ${t.custom ? '<span class="custom-badge">Custom</span>' : ''}
     </div>
     <div class="info">
       <div class="tname">${esc(t.city)} ${esc(t.name)}</div>
       <div class="coach">${esc(c.name)} · ${esc(c.style)} · ${formationOf(t.roster).name}</div>
       <div class="sets">${synergyChips(...Object.values(teamSyn(t)), { compact: true, onlyActive: true }) || '<span class="muted small">No synergies</span>'}</div>
       <div class="meters">${meter('Tempo', c.tempo)}${meter('Press', c.press)}${meter('Direct', c.directness)}${meter('Width', c.width)}</div>
-      <div class="card-foot"><span class="pick"></span></div>
+      <div class="card-foot"><span class="pick"></span>${t.custom ? `<button type="button" class="ghost edit" data-edit="${t.id}">Edit</button>` : ''}</div>
     </div>
   </div>`;
 }
 function teamSyn(t) {
-  const cards = ['GK', 'DEF1', 'DEF2', 'MID1', 'MID2', 'FWD', 'FLEX'].map((k) => POKEMON[parseCard(t.roster[k], k).mon]);
+  const cards = ['GK', 'DEF1', 'DEF2', 'MID1', 'MID2', 'FWD', 'FLEX'].map((k) => POKEMON[parseCard(t.roster[k], k)?.mon]).filter(Boolean);
   const { counts, active } = teamSynergies(cards);
   return { counts, active };
 }
 function pickTeam(id) {
+  const t = findTeam(id);
+  if (t && validateRoster(t.roster).length) { editTeam(t); return; } // finish it first
   if (sel.home === id) sel.home = null;
   else if (sel.away === id) sel.away = null;
   else if (!sel.home) sel.home = id;
@@ -133,6 +199,7 @@ window.__pps = ctl;
 function startMatch(home, away, seed, options = matchOptions()) {
   if (!home || !away) return;
   ctl.options = options;
+  ctl.homeTeam = home; ctl.awayTeam = away;
   ctl.client?.terminate();
   Object.assign(ctl, { game: null, cur: null, ft: 0, hold: 0, queue: [], requested: 0, noMore: false, finalState: null, history: [], replay: null, shown: 0, simming: false, finished: false, lastCaption: null });
   showScreen('game');
@@ -144,7 +211,7 @@ function startMatch(home, away, seed, options = matchOptions()) {
   ctl.renderer.spriteStyle = ctl.opts.sprites;
   ctl.renderer.view = ctl.opts.camera;
   syncCamBtn();
-  history.replaceState(null, '', `?home=${home.id}&away=${away.id}&seed=${seed}${options.knockout ? '&ko=1' : ''}${options.injuries ? '' : '&inj=0'}`);
+  history.replaceState(null, '', `?home=${urlId(home)}&away=${urlId(away)}&seed=${seed}${options.knockout ? '&ko=1' : ''}${options.injuries ? '' : '&inj=0'}`);
   $('#lastplay').innerHTML = '<span class="muted">Setting up the match…</span>';
   ctl.client = new EngineClient(onEngineMessage);
   ctl.client.send({ type: 'new', home, away, seed, options });
@@ -352,7 +419,7 @@ function onFinal() {
       ${nHi ? `<button class="primary" id="btn-fhi" type="button">▶ Watch highlights (${nHi})</button>` : ''}
       <button id="btn-rematch" type="button">Rematch (new seed)</button><button id="btn-box" type="button">View stats</button></div>`;
   el.classList.remove('hidden');
-  $('#btn-rematch').onclick = () => startMatch(g.teams[0], g.teams[1], Math.floor(Math.random() * 1e9), ctl.options);
+  $('#btn-rematch').onclick = () => startMatch(ctl.homeTeam, ctl.awayTeam, Math.floor(Math.random() * 1e9), ctl.options);
   $('#btn-box').onclick = () => { el.classList.add('hidden'); selectTab('box'); $('.panel').scrollIntoView({ behavior: 'smooth' }); };
   if (nHi) $('#btn-fhi').onclick = () => startReplay(highlightItems(), 'Highlights');
 }
@@ -720,11 +787,16 @@ function renderRosters(g) {
 // ==========================================================================
 // Boot
 wireGuide();
+wireBuilder();
 renderTeamGrid();
 const params = new URLSearchParams(location.search);
 const qHome = findTeam(params.get('home')), qAway = findTeam(params.get('away'));
 if (qHome && qAway && qHome !== qAway) {
   sel.home = qHome.id; sel.away = qAway.id; syncSetup();
   startMatch(qHome, qAway, Number(params.get('seed')) || Math.floor(Math.random() * 1e9), { knockout: params.get('ko') === '1', injuries: params.get('inj') !== '0' });
+} else if (params.get('team')) {
+  showScreen('setup');
+  history.replaceState(null, '', location.pathname);
+  importDialog(params.get('team'));
 } else showScreen(location.hash === '#cards' ? 'guide' : settings.get('screen', 'setup'));
 
