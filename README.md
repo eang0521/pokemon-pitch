@@ -2,7 +2,7 @@
 
 A static, browser-only 7-a-side soccer simulation where every player is a Pokémon card. It's a sibling of Pokémon Gridiron (the football sim) and shares its architecture and look: vanilla ES modules, no build step, no backend, hosted on GitHub Pages.
 
-> **Status: milestone 2 of 6.** Cards, rosters and the headless match engine are done (tuned with `tools/sim-test.mjs`). The pitch renderer and match screen are next. The 8 regional teams are provisional (auto-built from each region's Pokédex) until milestone 5.
+> **Status: milestone 3 of 6.** Cards, the match engine, and the match screen (pitch, controls, play-by-play, stats, replays) are done. Coach AI, fatigue and subs, and type synergies are next. The 8 regional teams are provisional (auto-built from each region's Pokédex) until milestone 5.
 
 ## Cards
 Every card is a **Pokémon at a position**: Lucario GK and Lucario FWD are different cards. All 1,025 Pokémon can play all 4 positions. A card's ratings come from the Pokémon's six base stats, and each stat means something different at each position:
@@ -26,6 +26,16 @@ The **Cards** screen explains every stat at every position, shows how OVR is wei
 - **Bench (6):** one backup each at GK, DEF, MID and FWD, plus two more outfield subs. That's 13 cards, with no Pokémon twice.
 
 Roster values use pokemondb.net slugs; multi-position slots (FLEX, SUB1, SUB2) take `slug:POS`, for example `arcanine:FWD`.
+
+## Watching a match
+Pick a home and an away team and kick off, or open a link like `?home=kanto&away=johto&seed=42` (the same seed always plays the same match).
+
+- **The pitch** is drawn on a canvas with the Pokémon as sprites, team-coloured bases (keepers in their own kit, and the away side switches colours on a clash), and the ball with its shadow so you can see how high it is. On a portrait phone the pitch turns vertical to fill the screen.
+- **Camera:** follows the ball like a broadcast, or shows the full pitch (button, or press C).
+- **Controls:** play/pause (Space, or tap the pitch on a phone), speed ½×–4× (1× runs three seconds of match time per real second, so a match takes about 7 minutes), Sim to half, Sim to end, full screen (F).
+- **Replays and highlights:** every shot, goal and card in the play-by-play has a ▶ to watch it again. **Highlights** plays every goal, red card, woodwork and big save so far, and the final whistle offers the reel.
+- **Tabs:** play-by-play (optionally every pass), stats (possession, shots, on target, xG, passes and completion, tackles, interceptions, saves, corners, fouls, cards, plus a player table), and lineups. Tap or hover a player on the pitch for their card.
+- The match runs in a Web Worker, so the page stays smooth even during a sim; if workers aren't available it runs on the page.
 
 ## The match engine
 A match is two 10-minute halves on a 60 × 40 m pitch with 5 × 2 m goals and 9 m-deep penalty areas (no offside yet). It runs at a fixed 0.05 s step and is reproducible from (home, away, seed).
@@ -56,7 +66,11 @@ Tuning constants live in `TUNE` in `js/sim/matchSim.js`. The xG model is fitted 
 ```
 index.html            page shell
 css/style.css         styles (shared look with the football sim)
-js/main.js            UI controller (screens)
+js/main.js            UI controller: matchup picker, match playback, scorebug, panels, replays
+js/render.js          pitch canvas + sprite tokens, camera
+js/client.js          page-side match mirror + Web Worker connection
+js/worker.js          Web Worker that runs the engine
+js/engine.js          engine host: packs records into compact messages
 js/guide.js           card guide: stat explainer + card browser
 js/ui.js              shared UI helpers (escaping, type chips, sprites)
 js/match.js           match: clock, halves, score, restarts, stats, play-by-play, frame records

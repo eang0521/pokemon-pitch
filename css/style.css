@@ -516,3 +516,39 @@ body.theater .sb-clock { font-size: 18px; }
   .cm-img { width: 60px; height: 60px; }
   .g-list { grid-template-columns: 1fr; }
 }
+
+/* ---------- match screen (soccer) ---------- */
+.caption { position: absolute; left: 50%; bottom: 10px; transform: translateX(-50%); max-width: calc(100% - 20px); background: rgba(14,17,22,.86); border: 1px solid var(--line); border-radius: 8px; padding: 5px 10px; font-weight: 600; font-size: 13px; pointer-events: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; z-index: 15000; }
+.cap-team { font-size: 10.5px; font-weight: 800; color: #fff; padding: 1px 5px; border-radius: 4px; margin-right: 6px; text-shadow: 0 1px 1px rgba(0,0,0,.5); }
+.toast { z-index: 15001; }
+.toast.small { font-size: clamp(18px, 3.5vw, 34px); }
+.final { z-index: 15002; }
+.final-btns { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; justify-content: center; }
+.sb-team .to i.red { background: var(--bad); width: 8px; height: 11px; border-radius: 2px; }
+.token.dive img { transform: translateX(-50%) rotate(-25deg); }
+.token.dive img.flip { transform: translateX(-50%) scaleX(-1) rotate(-25deg); }
+table.st.cmp td:nth-child(2), table.st.cmp td:nth-child(3), table.st.cmp th { text-align: center; }
+table.st.cmp td { font-size: 12.5px; padding: 5px; }
+.inj { color: var(--bad); font-weight: 700; }
+.team-card.sel-home { outline: 3px solid var(--accent); }
+.team-card.sel-away { outline: 3px solid var(--accent2); }
+.lastplay .lp-dd { font-variant-numeric: tabular-nums; }
+/* portrait phones: the pitch is drawn vertically, so give it a taller stage */
+@media (max-width: 640px) and (orientation: portrait) {
+  .stage { aspect-ratio: 4 / 5; }
+  body.theater .stage { flex: 1; aspect-ratio: auto; }
+}
+/* phones held sideways: compact header and scorebug so the pitch gets the height */
+@media (orientation: landscape) and (max-height: 500px) {
+  .topbar { padding: 4px 16px; }
+  .brand .tag { display: none; }
+  .brand h1 { font-size: 16px; }
+  .game { padding-top: 6px; gap: 6px; }
+  .sb-team { padding: 2px 10px; }
+  .sb-team .logo, .sb-team .logo img { width: 30px; height: 30px; }
+  .sb-team .city { display: none; }
+  .sb-team .pts { font-size: 26px; }
+  .sb-mid { padding: 2px 10px; }
+  .sb-clock { font-size: 17px; }
+  .stage { height: calc(100svh - 120px); }
+}

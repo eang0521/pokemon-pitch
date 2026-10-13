@@ -28,14 +28,85 @@
       <button type="button" data-mode="setup">Play</button>
       <button type="button" data-mode="guide">Cards</button>
     </nav>
+    <button id="btn-new" class="ghost hidden" type="button"><span class="l-long">New match</span><span class="l-short">New</span></button>
   </header>
 
   <!-- ============ SETUP ============ -->
   <main id="setup" class="setup hidden">
     <section class="setup-intro">
       <h2>Pick your matchup</h2>
-      <p>The match engine is being built (milestone 2). In the meantime, the <a href="#cards" data-goto="guide">card guide</a> shows how every Pokémon rates at every position.</p>
+      <p>Choose a home team, then an away team. Every player is a Pokémon card, and its six base stats mean something different at each position (see <a href="#cards" data-goto="guide">Cards</a>). The match is simulated player by player: passes, runs, tackles, shots and saves.</p>
     </section>
+    <div class="matchup-bar">
+      <div class="slot" id="slot-home"><span class="slot-label">Home</span><span class="slot-name">Select a team</span></div>
+      <span class="vs">vs</span>
+      <div class="slot" id="slot-away"><span class="slot-label">Away</span><span class="slot-name">Select a team</span></div>
+      <div class="setup-actions">
+        <label class="seed">Seed <input id="seed" type="number" min="1" max="999999999" placeholder="random" /></label>
+        <button id="btn-random" type="button" class="ghost">Random</button>
+        <button id="btn-start" type="button" class="primary" disabled>Kick off</button>
+      </div>
+    </div>
+    <div id="team-grid" class="team-grid"></div>
+  </main>
+
+  <!-- ============ MATCH ============ -->
+  <main id="game" class="game hidden">
+    <div class="scorebug" id="scorebug"></div>
+
+    <div class="stage-wrap">
+      <div class="stage" id="stage">
+        <canvas id="field"></canvas>
+        <div id="tokens" class="tokens"></div>
+        <canvas id="overlay"></canvas>
+        <div id="caption" class="caption hidden"></div>
+        <div id="toast" class="toast hidden"></div>
+        <div id="final" class="final hidden"></div>
+        <button id="btn-theater" class="stage-btn" type="button" title="Full screen (F)" aria-label="Full screen" aria-pressed="false">
+          <svg class="i-open" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5"/></svg>
+          <svg class="i-close" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 4v5H4M20 9h-5V4M15 20v-5h5M4 15h5v5"/></svg>
+        </button>
+      </div>
+      <div class="controls">
+        <div class="ctrl-group ctrl-main">
+          <button id="btn-play" type="button" class="primary" aria-label="Play or pause">▶ Play</button>
+          <button id="btn-simh" type="button" title="Simulate the rest of this half instantly, then keep watching">Sim <span class="l-long">to </span>half</button>
+          <button id="btn-sim" type="button" title="Simulate the rest of the match instantly">Sim <span class="l-long">to </span>end</button>
+          <button id="btn-hi" type="button" title="Watch every goal and big moment so far">Highlights</button>
+          <button id="btn-cam" type="button" class="cam-btn" title="Camera: follow the ball, or show the whole pitch (C)">Full pitch</button>
+        </div>
+        <div class="ctrl-group speed" role="group" aria-label="Playback speed">
+          <span class="ctrl-label">Speed</span>
+          <button data-speed="0.5" type="button">½×</button>
+          <button data-speed="1" type="button" class="on">1×</button>
+          <button data-speed="2" type="button">2×</button>
+          <button data-speed="4" type="button">4×</button>
+        </div>
+        <button id="btn-opts" type="button" class="ghost opts-btn" aria-expanded="false" aria-controls="ctrl-toggles">⚙ Options</button>
+        <div class="ctrl-group toggles" id="ctrl-toggles">
+          <label><input type="checkbox" id="opt-names" /> Names</label>
+          <label><input type="checkbox" id="opt-passes" /> Every pass in the play-by-play</label>
+          <label class="select">Sprites
+            <select id="opt-sprites">
+              <option value="home">Pokémon HOME</option>
+              <option value="bw">Gen 5 animated</option>
+            </select>
+          </label>
+        </div>
+      </div>
+      <div id="lastplay" class="lastplay"></div>
+    </div>
+
+    <aside class="panel">
+      <nav class="tabs" role="tablist">
+        <button role="tab" data-tab="pbp" class="on" type="button">Play-by-play</button>
+        <button role="tab" data-tab="box" type="button">Stats</button>
+        <button role="tab" data-tab="roster" type="button">Lineups</button>
+      </nav>
+      <div class="tab-body" id="tab-pbp"></div>
+      <div class="tab-body hidden" id="tab-box"></div>
+      <div class="tab-body hidden" id="tab-roster"></div>
+    </aside>
   </main>
 
   <!-- ============ CARD GUIDE ============ -->

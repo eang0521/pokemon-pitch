@@ -151,7 +151,7 @@ export class Match {
   nm(e, team = true) { return e ? `${e.name}${team ? ` (${this.teams[e.side].abbr})` : ''}` : 'someone'; }
   scoreText() { return `${this.teams[0].abbr} ${this.score[0]}–${this.score[1]} ${this.teams[1].abbr}`; }
   add(type, side, text, extra = {}) {
-    this.log.push({ half: this.half, clock: Math.min(this.clock, HALF_SECS), type, side, text, ...extra });
+    this.log.push({ half: this.half, clock: Math.min(this.clock, HALF_SECS), type, side, text, rec: this.recId - 1, ...extra });
   }
 
   onEvent(type, d) {
@@ -188,7 +188,7 @@ export class Match {
         if (onT) { ps(s.by).sot++; T[side].sot++; }
         if (d.result === 'blocked') T[side].blocked++;
         const words = { saved: `saved by ${this.nm(d.by, false)}`, blocked: `blocked by ${this.nm(d.by, false)}`, missed: s.post ? 'off the woodwork and wide' : 'wide', post: 'off the woodwork and out' };
-        if (d.result !== 'goal' && words[d.result]) this.add('shotEnd', side, `…${words[d.result]}.`, { minor: d.result === 'blocked' });
+        if (d.result !== 'goal' && words[d.result]) this.add('shotEnd', side, `…${words[d.result]}.`, { minor: d.result === 'blocked', result: d.result, xg: s.xg, by: d.by?.id, shooter: s.by.id });
         break;
       }
       case 'save': {
