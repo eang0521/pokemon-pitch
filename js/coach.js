@@ -68,7 +68,11 @@ export class Coach {
     let msg = null;
     const nudge = (k, by, text) => {
       const v = clamp(this.learned[k] + by, -0.25, 0.25);
-      if (Math.abs(v - this.learned[k]) > 1e-9) { this.learned[k] = v; if (text && Math.abs(v) >= 0.2 && Math.sign(v) === Math.sign(by)) msg = text; }
+      if (Math.abs(v - this.learned[k]) > 1e-9) {
+        // tell the viewer once, when the adjustment first becomes a real change of approach
+        if (text && Math.abs(v) >= 0.2 && Math.abs(this.learned[k]) < 0.2 && Math.sign(v) === Math.sign(by)) msg = text;
+        this.learned[k] = v;
+      }
     };
     if (long.length >= 6 && ground.length >= 15) {
       const r = (rate(long) + 0.01) / (rate(ground) + 0.01);

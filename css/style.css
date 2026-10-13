@@ -568,3 +568,11 @@ tr.potm-row td { background: rgba(255, 203, 5, .07); }
 .team-card.incomplete .pick::after { content: 'Unfinished — tap to finish it'; color: var(--bad); }
 .cs input[type=text] { grid-column: 2 / -1; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 4px 7px; }
 .coach-ctl p { margin: 4px 0 0; }
+/* the side panel may shrink below its widest table (the table scrolls inside it instead) */
+.panel { min-width: 0; }
+@media (max-width: 640px) {
+  table.st th, table.st td { padding: 4px 3px; font-size: 11px; }
+  table.st td.pl { gap: 4px; }
+  table.st td.pl img { width: 20px; height: 20px; }
+  .rtg { min-width: 26px; padding: 1px 2px; }
+}

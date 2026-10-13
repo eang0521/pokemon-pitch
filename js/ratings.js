@@ -78,10 +78,10 @@ const OFF_POSITION = 0.85;
 
 // How much each trait matters for the card's overall (each row sums to 1).
 export const OVR_WEIGHTS = {
-  GK: { refl: 0.3, gkPos: 0.22, handling: 0.2, comp: 0.12, power: 0.06, reach: 0.06, stm: 0.04 },
-  DEF: { tackle: 0.24, awr: 0.24, str: 0.18, pace: 0.16, pass: 0.1, stm: 0.08 },
-  MID: { pass: 0.26, touch: 0.2, ret: 0.14, pace: 0.14, power: 0.12, stm: 0.14 },
-  FWD: { finish: 0.26, pace: 0.2, power: 0.18, move: 0.16, ret: 0.12, stm: 0.08 },
+  GK: { refl: 0.32, gkPos: 0.18, handling: 0.18, comp: 0.1, power: 0.08, reach: 0.1, stm: 0.04 },
+  DEF: { tackle: 0.22, awr: 0.2, str: 0.2, pace: 0.2, pass: 0.1, stm: 0.08 },
+  MID: { pass: 0.22, touch: 0.18, ret: 0.17, pace: 0.17, power: 0.12, stm: 0.14 },
+  FWD: { finish: 0.24, pace: 0.22, power: 0.18, move: 0.14, ret: 0.14, stm: 0.08 },
 };
 // Plain-words names for the traits in OVR_WEIGHTS that aren't a base stat.
 export const TRAIT_NAMES = {
@@ -139,7 +139,7 @@ export function cardRatings(slug, pos, statBoost = null, bonus = null) {
   r.mass = massRating(p.weight);
   r.reach = reachRating(p.height);
   // agility: quickness from Speed, lighter bodies change direction faster
-  r.agi = clamp(Math.round(0.7 * rate(s.spe) + 0.3 * (110 - r.mass)), 20, 99);
+  r.agi = clamp(Math.round(0.8 * rate(s.spe) + 0.2 * (105 - r.mass)), 20, 99);
   return r;
 }
 

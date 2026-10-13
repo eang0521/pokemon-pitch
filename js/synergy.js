@@ -36,19 +36,19 @@ export const SYNERGY_VALUES = {
   steel: [0.06, 0.12, 0.19],
   psychic: [0.1, 0.2, 0.32],
   fairy: [0.055, 0.11, 0.17],
-  electric: [0.018, 0.035, 0.06],
+  electric: [0.07, 0.14, 0.22],
   clutch: [0.08, 0.16, 0.26], // rating multiplier bonus in clutch time
   burst: [0.017, 0.035, 0.06], // acceleration multiplier bonus
-  flow: [0.04, 0.08, 0.13], // extra turning (acceleration) when changing direction
+  flow: [0.03, 0.06, 0.1], // extra turning (acceleration) when changing direction
   growth: [0.015, 0.03, 0.05], // rating bonus reached by full time (0 at kickoff)
   regen: [0.08, 0.15, 0.25], // Grass: energy drain reduction
   chill: [0.8, 1.6, 2.6], // seconds an opponent is slowed after a tackle or barge
   toxic: [1.5, 3, 5], // extra energy an opponent loses per tackle or barge
-  grounded: [0.08, 0.15, 0.25], // logit bonus in tackles (for and against)
+  grounded: [0.04, 0.08, 0.13], // logit bonus in tackles (for and against)
   reach: [0.09, 0.18, 0.3], // metres of extra aerial reach
   swarm: [0.17, 0.35, 0.55], // logit bonus per nearby teammate in a tackle (up to 3)
   sturdy: [0.15, 0.3, 0.5], // logit bonus resisting tackles
-  phase: [0.09, 0.18, 0.3], // chance a tackle on them misses
+  phase: [0.075, 0.15, 0.25], // chance a tackle on them misses
   misread: [0.045, 0.09, 0.15], // seconds of extra reaction time for opponents on their passes and shots
 };
 

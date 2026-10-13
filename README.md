@@ -2,7 +2,7 @@
 
 A static, browser-only 7-a-side soccer simulation where every player is a Pokémon card. It's a sibling of Pokémon Gridiron (the football sim) and shares its architecture and look: vanilla ES modules, no build step, no backend, hosted on GitHub Pages.
 
-> **Status: milestone 5 of 6.** Cards, the match engine and screen, coach AI, fatigue and substitutions, synergies, shootouts, the 8 regional teams, the team picker, the team builder and share codes are done. A balance pass and polish are next.
+> **Status: all six milestones done.** Planned next: a player mode (control one Pokémon with WASD), gym-leader teams, and a roguelike adventure mode like the football sim's.
 
 ## Cards
 Every card is a **Pokémon at a position**: Lucario GK and Lucario FWD are different cards. All 1,025 Pokémon can play all 4 positions. A card's ratings come from the Pokémon's six base stats, and each stat means something different at each position:
@@ -30,12 +30,12 @@ Eight regional AI teams, each hand-picked from its region's Pokédex (no legenda
 | Johto Jets | Elm | Long Ball | 2-2-2 | Tyranitar, Espeon, Typhlosion, Crobat in goal |
 | Hoenn Hurricanes | Birch | Wing Play | 2-3-1 | Metagross, Salamence, Gardevoir, Milotic in goal |
 | Sinnoh Blizzard | Rowan | Park the Bus | 3-2-1 | Garchomp, Dusknoir, Lucario, Glaceon in goal |
-| Unova Volts | Juniper | High Press | 2-2-2 | Hydreigon, Volcarona, Zoroark, Chandelure in goal |
+| Unova Volts | Juniper | High Press | 2-2-2 | Zoroark, Volcarona, Mienshao, Hydreigon off the bench |
 | Kalos Royals | Sycamore | Possession | 2-3-1 | Goodra, Florges, Greninja, Delphox in goal |
 | Alola Tides | Kukui | Island Style | 2-2-2 | Kommo-o, Primarina, Decidueye, Salazzle in goal |
 | Galar Gales | Leon | Champion Time | 2-3-1 | Dragapult, Inteleon, Hatterene, Duraludon in goal |
 
-`node tools/league.mjs 6` plays a full home-and-away league six times over. Seven teams finish within about 25 points of each other; Alola (the weakest region) is the underdog.
+`node tools/league.mjs 6` plays a full home-and-away league six times over (84 matches per team). In the latest run every team finished between 100 and 135 points.
 
 ## Building your own team
 **＋ Build a team** opens the builder. Pick a card for each of the 13 slots from all 1,025 Pokémon. You can:
@@ -59,7 +59,8 @@ Pick a home and an away team and kick off, or open a link like `?home=kanto&away
 
 - **The pitch** is drawn on a canvas with the Pokémon as sprites, team-coloured bases (keepers in their own kit, and the away side switches colours on a clash), and the ball with its shadow so you can see how high it is. On a portrait phone the pitch turns vertical to fill the screen.
 - **Camera:** follows the ball like a broadcast, or shows the full pitch (button, or press C).
-- **Controls:** play/pause (Space, or tap the pitch on a phone), speed ½×–4× (1× runs three seconds of match time per real second, so a match takes about 7 minutes), Sim to half, Sim to end, full screen (F).
+- **Controls:** play/pause, speed ½×–4× (1× runs three seconds of match time per real second, so a match takes about 7 minutes), Sim to half, Sim to end, full screen.
+- **Keyboard:** Space play/pause · C camera · F full screen · Esc leave a replay or full screen. On a phone, tap the pitch to play/pause.
 - **Replays and highlights:** every shot, goal and card in the play-by-play has a ▶ to watch it again. **Highlights** plays every goal, red card, woodwork and big save so far, and the final whistle offers the reel.
 - **Tabs:** play-by-play (optionally every pass), team stats (possession, shots, on target, xG, passes and completion, tackles, interceptions, saves, corners, fouls, cards), players (a match rating out of 10 for everyone who played, the box score, and the player of the match), and lineups (a live depth chart: who's on, everyone's energy, the bench, active synergies, and what the coach is doing). Tap or hover a player on the pitch for their card.
 - **Options:** Injuries (on by default) and Knockout (a draw goes to a penalty shootout). Links carry them too: `&ko=1`, `&inj=0`.
@@ -80,15 +81,15 @@ Tuning constants live in `TUNE` in `js/sim/matchSim.js`. The xG model is fitted 
 
 | | per match |
 |---|---|
-| Goals | 5.9 (xG 5.4) |
-| Shots / on target | 41 / 50% |
-| Save % | 73% |
-| Passes / completion | 187 / 79% |
-| Fouls / yellow / red | 11 / 1.8 / 0.3 |
-| Penalties | 0.4 |
-| Corners | 4.2 |
-| Substitutions | about 6 per team (rolling) |
-| Home / draw / away | 48% / 25% / 27% |
+| Goals | 5.7 (xG 5.8) |
+| Shots / on target | 43 / 47% |
+| Save % | 74% |
+| Passes / completion | 169 / 77% |
+| Fouls / yellow / red | 11 / 1.8 / 0.2 |
+| Penalties | 0.1 |
+| Corners | 4.4 |
+| Substitutions | about 6–7 per team (rolling) |
+| Home / draw / away | 40% / 21% / 40% |
 
 ## Fatigue and substitutions
 HP is stamina. Energy drains every step, more the closer a player runs to top speed, and stamina stretches it (a keeper barely tires). Below 75% energy, ratings fade (down to 82% of normal at 45% energy). Everyone gets a little back at half time.
@@ -134,6 +135,20 @@ Magnitudes live in `SYNERGY_VALUES` in `js/synergy.js`. `tools/synergy-calibrate
 
 ## Penalty shootouts
 In a knockout match, a draw goes to penalties: five each, then sudden death, all at the same end. Every kick is played out by the sim. The keeper guesses a side (Composure against the taker's Composure), and the taker places it with Finishing and Composure. Takers go in order of their shooting, and the keeper takes last.
+
+## Balance
+Every number above was tuned by simulation with the tools below (they run on every CPU core). What the balance pass checked, and where things stand:
+
+- **No single stat dominates.** `node tools/balance.mjs stats` gives every player at one position +40 to one base stat and plays them against an unmodified copy. Early on, Pace and Ball Retention were worth up to +48% while Passing, Awareness and keeper stats did almost nothing (better passers even lost, because the decision model valued safe recycling over progress). After rebalancing, every stat at every position lands between about −15% and +25% (±11% is one standard error): pace and retention count for less, and passing accuracy, vision, awareness, finishing and keeping count for more.
+- **Pace has diminishing returns.** Pace and agility ratings above 68 count for less, so a team of the fastest Pokémon in the game is good but beatable.
+- **Extreme teams** (`node tools/balance.mjs extremes`), against the regional teams: the fastest Pokémon +20%; tiny Pokémon +38%; heavyweights −34%; giants −48%; glass cannons −41%; walls −67%; Kanto with Wailord in goal −23%, with Joltik in goal −27%; and the best-OVR team (BST ≤ 600) +69%. OVR predicts team strength, and no body type or gimmick is unbeatable.
+- **OVR weights** were re-set from those measurements, so a position's OVR leans on what actually wins there (for keepers: reflexes, then handling, positioning and reach).
+- **Formations** are rock-paper-scissors rather than one best choice: 2-2-2 beats 2-3-1 (+15%), 2-3-1 beats 3-2-1 (+14%), and 3-2-1 vs 2-2-2 is about even.
+- **Coaching presets** on identical rosters (`node tools/coach-test.mjs 32 presets`) land between −6% (Possession) and +12% (Long Ball). High Press started at +42%: pressing now costs energy, only the first presser goes in for the tackle, and aggressive tackling lunges (more challenges, but a lower success rate and longer recovery when beaten).
+- **Synergies** at tier II give between about 0% and +20% over a team without them (`node tools/synergy-calibrate.mjs`).
+- **Expected goals** are refitted to the sim's own shots (`node tools/xg-fit.mjs`), so xG matches goals across the league.
+
+Known soft spots: Electric is the weakest synergy (speed boosts run into the pace soft cap), and single-player swaps move results less than you might expect, because rolling substitutions share the minutes.
 
 ## Project layout
 
@@ -196,6 +211,9 @@ node tools/fatigue-report.mjs 12  # energy at full time by position and stamina,
 node tools/synergy-calibrate.mjs 160 all 2   # win-rate edge of every type synergy (all CPU cores)
 node tools/coach-test.mjs 200     # adapting vs frozen coaches: comebacks, late shots, preset records
 node tools/league.mjs 6            # full home-and-away league, 6 times over: standings, shots, xG
+node tools/balance.mjs stats 80    # +40 to each base stat at each position: which stats win matches
+node tools/balance.mjs extremes 64 # speedsters, giants, tiny, walls, a giant keeper... vs the regional teams
+node tools/balance.mjs ovr 128     # does OVR predict results when one starter is swapped?
 node tools/ratings-report.mjs 8   # OVR spread per position, stat weights, top cards
 node tools/fetch-pokemon.mjs      # refresh the card database from pokemondb.net
 ```

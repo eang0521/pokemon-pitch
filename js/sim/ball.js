@@ -55,7 +55,15 @@ export function groundTravel(v0, v1) {
   const t = Math.log((v0 + k) / (v1 + k)) / c;
   return { d: (v0 - v1) / c - k * t, t };
 }
+// Plans are cached by distance (to 5 cm) since the same few kicks are weighed over and over.
+const groundCache = new Map(), loftCache = new Map();
 export function planGround(d, v1) {
+  const key = Math.round(d * 20) * 1000 + Math.round(v1 * 20);
+  let r = groundCache.get(key);
+  if (!r) { r = planGroundRaw(Math.round(d * 20) / 20, Math.round(v1 * 20) / 20); if (groundCache.size < 50000) groundCache.set(key, r); }
+  return r;
+}
+function planGroundRaw(d, v1) {
   let lo = v1, hi = 45;
   for (let i = 0; i < 30; i++) { const mid = (lo + hi) / 2; if (groundTravel(mid, v1).d < d) lo = mid; else hi = mid; }
   return { v0: hi, t: groundTravel(hi, v1).t };
@@ -77,6 +85,12 @@ export function groundTime(v0, d) {
 // Lofted ball landing (first bounce) at distance d with launch angle `ang` (radians),
 // corrected for air drag by a quick simulation. Returns { v, vz, vh, t }.
 export function planLofted(d, ang) {
+  const key = Math.round(d * 20) * 100 + Math.round(ang * 50);
+  let r = loftCache.get(key);
+  if (!r) { r = planLoftedRaw(Math.round(d * 20) / 20, ang); if (loftCache.size < 50000) loftCache.set(key, r); }
+  return r;
+}
+function planLoftedRaw(d, ang) {
   let v = Math.sqrt((d * G) / Math.sin(2 * ang));
   for (let it = 0; it < 4; it++) {
     const got = loftRange(v, ang);

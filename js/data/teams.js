@@ -45,10 +45,10 @@ export const TEAMS = [
   {
     id: 'unova', city: 'Unova', name: 'Volts', abbr: 'UNO',
     colors: { primary: '#fdd835', secondary: '#212121' },
-    coach: { ...coach('Coach Juniper', 'highPress'), press: 0.72 },
+    coach: { ...coach('Coach Juniper', 'highPress'), press: 0.65 },
     roster: {
-      GK: 'chandelure', DEF1: 'haxorus', DEF2: 'krookodile', MID1: 'volcarona', MID2: 'reuniclus', FWD: 'hydreigon', FLEX: 'zoroark:FWD',
-      bGK: 'vanilluxe', bDEF: 'excadrill', bMID: 'samurott', bFWD: 'mienshao', SUB1: 'eelektross:MID', SUB2: 'serperior:DEF',
+      GK: 'chandelure', DEF1: 'haxorus', DEF2: 'krookodile', MID1: 'volcarona', MID2: 'reuniclus', FWD: 'zoroark', FLEX: 'mienshao:FWD',
+      bGK: 'vanilluxe', bDEF: 'excadrill', bMID: 'samurott', bFWD: 'hydreigon', SUB1: 'eelektross:MID', SUB2: 'serperior:DEF',
     },
   },
   {

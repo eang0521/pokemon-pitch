@@ -12,7 +12,7 @@ import {
   L, W, GOAL_W, GOAL_H, GOAL_Y0, GOAL_Y1, POST_R, BALL_R, BOX_D, BOX_W, GA_D, PEN_SPOT, CIRCLE_R, DT,
   clamp, hyp, dist, sigmoid, inBox, goalAngle,
 } from './pitch.js';
-import { stepBall, predict, planGround, planLofted } from './ball.js';
+import { stepBall, predict, planGround, planLofted, BALL } from './ball.js';
 import { cardRatings } from '../ratings.js';
 import { teamSynergies, playerEffects } from '../synergy.js';
 import { fatigueMult } from '../depth.js';
@@ -20,43 +20,45 @@ import { fatigueMult } from '../depth.js';
 // Tunable constants (tools/sim-test.mjs is the reference for what they produce).
 export const TUNE = {
   // movement
-  spdBase: 5.2, spdPer: 0.045, // top speed m/s = base + pace * per
-  accBase: 3.2, accPer: 0.045, // acceleration m/s² = base + agility * per
+  spdBase: 6.15, spdPer: 0.03,
+  softCap: 68, // pace / agility ratings above this count for less // top speed m/s = base + pace * per
+  accBase: 3.8, accPer: 0.036, // acceleration m/s² = base + agility * per
   dribbleSlow: 0.7,
   dribbleVal: 0.6, // dribbling gains less than a pass to the same spot (slower, defenders recover) // top speed with the ball at your feet
   jog: 0.62, // share of top speed for shape movement
   // energy (per second): base + run * (speed / top speed)^3, scaled by stamina
   drainBase: 0.034, drainRun: 0.21, gkDrain: 0.25, benchRegen: 0.12,
   // decisions
-  noise: 0.009, // utility noise for a 0-vision player (scaled down by vision)
-  possVal: 0.04, // value of simply having the ball (lost on a turnover)
+  noise: 0.02, // utility noise for a 0-vision player (scaled down by vision)
+  possVal: 0.035, // value of simply having the ball (lost on a turnover)
+  progW: 0.04, // value per unit of pitch (0..1) the ball moves forward: going somewhere beats safe recycling
   threatAmp: 0.18, // peak of the positional threat curve (value of having the ball near goal)
   lossW: 0.9, // how much a turnover costs relative to what the pass gains
-  shotVal: 0.9, // value of a goal vs the positional threat scale
+  shotVal: 0.72, // value of a goal vs the positional threat scale
   holdMin: 0.25, holdTempo: 0.5, // seconds between carrier decisions: min + (1 - tempo) * holdTempo
   // kicking
-  passErr: 0.022, passErrPer: 0.0011, // radians of aim error: base + (100 - passing) * per
-  shotErr: 0.045, shotErrPer: 0.0018,
+  passErr: -0.03, passErrPer: 0.0022, // radians of aim error: base + (100 - passing) * per
+  shotErr: 0.005, shotErrPer: 0.0028,
   kickPow: 15, kickPowPer: 0.18, // max kick speed m/s = base + power * per
   // contests
   ctrlBase: 1.2, ctrlSlope: 0.55, // control chance = base - slope * (ball speed / (9 + touch * 0.12))
-  tackleTry: 0.04, // chance per tick an opponent in range goes in for a tackle
+  tackleTry: 0.055, // chance per tick an opponent in range goes in for a tackle
   tackleRange: 1.15,
   block: 0.45, blockRange: 1.6, // a defender in the way when a pass or shot is struck
   tackleBias: 0.7,
   pressCost: 4, // extra sprint energy for pressers, per unit of press
   aggrLunge: 0.9, // tackle-success logit per unit of aggression below 0.5
   frontTry: 1.8, frontBonus: 0.35, // a defender squared up in front goes in more often and wins more // logit offset on tackle success
-  foulBase: 0.014, foulAggr: 0.026, foulBehind: 0.06,
-  yellow: 0.08, red: 0.004,
+  foulBase: 0.009, foulAggr: 0.02, foulBehind: 0.05,
+  yellow: 0.06, red: 0.004,
   // keepers
-  gkReach: 0.45, gkReachPer: 0.005, // standing lateral reach = base + reach * per
-  gkDive: 0.6, gkDivePer: 0.008, // extra reach at full stretch of a dive = base + reflexes * per
+  gkReach: 0.3, gkReachPer: 0.008, // standing lateral reach = base + reach * per
+  gkDive: 0.34, gkDivePer: 0.012, // extra reach at full stretch of a dive = base + reflexes * per
   gkDiveTime: 0.45, // seconds from the start of a dive to full stretch
   gkTop: 1.55, gkTopPer: 0.011, // highest point they can get a hand to
-  gkReact: 0.33, gkReactPer: 0.0018, // reaction time = base - reflexes * per
+  gkReact: 0.41, gkReactPer: 0.003, // reaction time = base - reflexes * per
   gkDiveSpd: 2.0, gkDiveSpdPer: 0.03,
-  gkHold: 0.25, gkHoldPer: 0.0075, // chance to hold a shot = base + handling * per - speed penalty
+  gkHold: 0.02, gkHoldPer: 0.011, // chance to hold a shot = base + handling * per - speed penalty
 };
 
 // Formation spots (attacking frame: u = 0 own goal line .. 1 opponent's; v = 0..1 across).
@@ -140,8 +142,10 @@ export class MatchSim {
     const r = {};
     for (const k in e.r0) r[k] = k === 'mass' || k === 'reach' ? e.r0[k] : Math.max(20, Math.round(e.r0[k] * m));
     e.r = r;
-    e.maxSpd = TUNE.spdBase + r.pace * TUNE.spdPer;
-    e.accel = (TUNE.accBase + r.agi * TUNE.accPer) * (1 + (e.mods.burst || 0));
+    // diminishing returns at the very top, so pure speed can't run a match on its own
+    const soft = (v) => (v > TUNE.softCap ? TUNE.softCap + (v - TUNE.softCap) * 0.35 : v);
+    e.maxSpd = TUNE.spdBase + soft(r.pace) * TUNE.spdPer;
+    e.accel = (TUNE.accBase + soft(r.agi) * TUNE.accPer) * (1 + (e.mods.burst || 0));
     e.headZ = Math.min(3.3, 0.75 + clamp(e.height, 0.2, 4) * 0.75 + (e.mods.reach || 0));
     e.gkReach = TUNE.gkReach + r.reach * TUNE.gkReachPer;
     e.gkDive = TUNE.gkDive + r.refl * TUNE.gkDivePer;
@@ -292,7 +296,7 @@ export class MatchSim {
     const gx = this.goalX(si);
     const d = hyp(gx - x, W / 2 - y), ang = goalAngle(x, y, gx);
     // fitted to the sim's own shots by tools/xg-fit.mjs
-    return sigmoid(-1.95 - 0.06 * d + 2.3 * ang - (header ? 0.3 : 0) - 0.8 * pressure);
+    return sigmoid(-2.14 - 0.037 * d + 2.5 * ang - (header ? 0.2 : 0) - 0.42 * pressure);
   }
   pressureOn(e) {
     let d = 9;
@@ -520,7 +524,7 @@ export class MatchSim {
     // positioning: on the line between the ball and the middle of the goal
     const gx = b.x - own, gy = b.y - W / 2, g = hyp(gx, gy) || 1;
     const sharp = e.r.gkPos;
-    if (this.t > e.posErrT) { e.posErr = this.rng.gauss(0, (100 - sharp) * 0.012); e.posErrT = this.t + 1.5; }
+    if (this.t > e.posErrT) { e.posErr = this.rng.gauss(0, (100 - sharp) * 0.022); e.posErrT = this.t + 1.5; }
     // come further off the line as the ball gets closer (narrowing the angle), but not for long shots
     const out = clamp(0.5 + g * 0.11, 0.5, 2.2 + sharp * 0.02);
     e.tx = own + (gx / g) * out; e.ty = W / 2 + (gy / g) * out + e.posErr;
@@ -571,7 +575,8 @@ export class MatchSim {
     const restricted = e.restricted;
     const press = this.pressureOn(e);
     const vision = e.r.vision;
-    const noise = () => this.rng.gauss(0, TUNE.noise * (1.25 - vision / 100));
+    // (team.testNoise: a tools-only multiplier for experiments on decision quality)
+    const noise = () => this.rng.gauss(0, TUNE.noise * (1.25 - vision / 100) * (S.depth.team.testNoise ?? 1));
     const opts = [];
     const gx = this.goalX(e.side);
     const K = TUNE.possVal;
@@ -592,6 +597,25 @@ export class MatchSim {
     }
     if (restricted === 'penalty') return this.shoot(e, { penalty: true });
 
+    // --- dribble (or shield)
+    if (!handsOrSet) {
+      const ax = gx > e.x ? 1 : -1;
+      for (const ang of [-1.2, -0.7, -0.3, 0, 0.3, 0.7, 1.2, Math.PI]) {
+        const dx = Math.cos(ang) * ax, dy = Math.sin(ang);
+        const P = { x: e.x + dx * 5, y: e.y + dy * 5 };
+        if (P.x < 0.8 || P.x > L - 0.8 || P.y < 0.8 || P.y > W - 0.8) continue;
+        const keep = this.keepChance(e, P);
+        const u = keep * (here * (1 - TUNE.dribbleVal) + this.threat(e.side, P.x, P.y) * TUNE.dribbleVal + K)
+          - (1 - keep) * (TUNE.lossW * this.threat(1 - e.side, e.x, e.y) + K)
+          + (0.5 - C.tempo) * 0.01 + noise();
+        opts.push({ type: 'dribble', u, P, keep });
+      }
+      // clear it: own third under pressure
+      if (this.u(e.side, e.x) < 0.33 && press > 0.3) {
+        opts.push({ type: 'clear', u: -0.2 * K - TUNE.lossW * this.threat(1 - e.side, this.X(e.side, 0.6), W / 2) + noise() });
+      }
+    }
+    this.bestU = opts.reduce((m, o) => Math.max(m, o.u), -Infinity);
     // --- passes
     const maxD = restricted === 'throwIn' ? 20 : b.inHands ? 30 : 60;
     for (const m of this.live(S)) {
@@ -625,24 +649,6 @@ export class MatchSim {
           const P = { x: m.x + (gx > 0 ? 0.5 : -0.5), y: m.y };
           this.passOption(opts, e, m, P, 'cross', here, noise);
         }
-      }
-    }
-    // --- dribble (or shield)
-    if (!handsOrSet) {
-      const ax = gx > e.x ? 1 : -1;
-      for (const ang of [-1.2, -0.7, -0.3, 0, 0.3, 0.7, 1.2, Math.PI]) {
-        const dx = Math.cos(ang) * ax, dy = Math.sin(ang);
-        const P = { x: e.x + dx * 5, y: e.y + dy * 5 };
-        if (P.x < 0.8 || P.x > L - 0.8 || P.y < 0.8 || P.y > W - 0.8) continue;
-        const keep = this.keepChance(e, P);
-        const u = keep * (here * (1 - TUNE.dribbleVal) + this.threat(e.side, P.x, P.y) * TUNE.dribbleVal + K)
-          - (1 - keep) * (TUNE.lossW * this.threat(1 - e.side, e.x, e.y) + K)
-          + (0.5 - C.tempo) * 0.01 + noise();
-        opts.push({ type: 'dribble', u, P });
-      }
-      // clear it: own third under pressure
-      if (this.u(e.side, e.x) < 0.33 && press > 0.3) {
-        opts.push({ type: 'clear', u: -0.2 * K - TUNE.lossW * this.threat(1 - e.side, this.X(e.side, 0.6), W / 2) + noise() });
       }
     }
     if (!opts.length) opts.push({ type: 'clear', u: 0 });
@@ -691,7 +697,7 @@ export class MatchSim {
     for (const o of this.live(this.opp(e))) {
       const d = Math.min(dist(o, mid), dist(o, P) + 0.5, dist(o, e) + 0.3);
       const close = sigmoid((2.4 - d) / 0.55);
-      const duel = clamp(0.5 + (o.r.tackle - e.r.ret) / 110 + (o.r.agi - e.r.agi) / 300, 0.15, 0.85);
+      const duel = clamp(0.5 + (o.r.tackle - e.r.ret) / 190 + (o.r.agi - e.r.agi) / 400, 0.15, 0.85);
       keep *= 1 - close * duel * 0.95;
     }
     return keep;
@@ -699,31 +705,35 @@ export class MatchSim {
 
   // Score one pass and add it to the options. kind: ground | lofted | through | cross | throw
   passOption(opts, e, m, P, kind, here, noise) {
+    // a pass is never worth more than the threat where it lands plus keeping the ball
+    if (kind !== 'cross' && this.threat(e.side, P.x, P.y) + TUNE.possVal + 0.04 < this.bestU) return;
     const plan = this.planKick(e, P, kind);
     if (!plan) return;
     const d = hyp(P.x - e.x, P.y - e.y);
-    // where the ball is along the way (for interception risk)
-    const ball = { x: e.x, y: e.y, z: kind === 'throw' ? 1.2 : 0.02, vx: plan.vx, vy: plan.vy, vz: plan.vz };
-    const path = predict(ball, Math.min(3.5, plan.t + 0.3), 0.15);
+    // where the ball is along the way (for interception risk), in closed form
+    const n = pathSamples(e, plan, kind === 'throw' ? 1.2 : 0.02, Math.min(3.5, plan.t + 0.2));
     let pLane = 1 - this.blockChance(e, plan.vx, plan.vy);
     for (const o of this.live(this.opp(e))) {
+      // too far from the line to get there in time: skip the detailed check
+      if (segDist(o.x, o.y, e.x, e.y, P.x, P.y) > o.maxSpd * (plan.t + 0.45) + 1.5) continue;
       let worst = 0;
       const zMax = o.slot === 'GK' && inBox(P.x, P.y, this.ownX(o.side)) ? o.gkTop : o.headZ;
-      for (const q of path) {
-        if (q.t > plan.t + 0.2) break;
-        if (q.t < 0.2 && hyp(o.x - e.x, o.y - e.y) < TUNE.blockRange + 0.5) continue; // covered by blockChance
-        if (q.z > zMax) continue;
-        const margin = this.timeTo(o, q.x, q.y) + 0.25 - q.t;
-        worst = Math.max(worst, sigmoid(-margin / 0.18));
+      const near = hyp(o.x - e.x, o.y - e.y) < TUNE.blockRange + 0.5;
+      for (let i = 0; i < n; i++) {
+        const t = PT[i];
+        if (t < 0.2 && near) continue; // covered by blockChance
+        if (PZ[i] > zMax) continue;
+        const margin = this.timeTo(o, PX[i], PY[i]) + 0.25 - t;
+        if (margin < 0.9) worst = Math.max(worst, sigmoid(-margin / 0.18));
       }
       pLane *= 1 - worst * 0.85;
     }
     const tR = this.timeTo(m, P.x, P.y);
     const pRecv = sigmoid((plan.t + 0.45 - tR) / 0.22);
     const skill = kind === 'throw' ? 70 : e.r.pass;
-    const err = (TUNE.passErr + (100 - skill) * TUNE.passErrPer) * (1 + this.pressureOn(e) * 0.6) * (kind === 'lofted' || kind === 'cross' ? 1.3 : 1);
+    const err = Math.max(0.008, TUNE.passErr + (100 - skill) * TUNE.passErrPer) * (1 + this.pressureOn(e) * 0.6) * (kind === 'lofted' || kind === 'cross' ? 1.3 : 1);
     const pAcc = clamp(1 - (err * d) / 3.5, 0.25, 1);
-    const pCtrl = kind === 'lofted' || kind === 'cross' ? 0.85 : 1;
+    const pCtrl = kind === 'lofted' ? 0.62 : kind === 'cross' ? 0.8 : 1; // long balls are hard to bring down
     const p = pLane * pRecv * pAcc * pCtrl;
     let gain = this.threat(e.side, P.x, P.y);
     // space around the receiver when the ball gets there
@@ -735,8 +745,9 @@ export class MatchSim {
     const prog = this.u(e.side, P.x) - this.u(e.side, e.x);
     const K = TUNE.possVal;
     const u = p * (gain + K) - (1 - p) * (TUNE.lossW * this.threat(1 - e.side, (e.x + P.x) / 2, (e.y + P.y) / 2) + K)
-      + (C.directness - 0.5) * 0.03 * prog + (kind === 'lofted' ? -0.004 : 0) + noise();
+      + (TUNE.progW + (C.directness - 0.5) * 0.03) * prog + (kind === 'lofted' ? -0.004 : 0) + noise();
     opts.push({ type: 'pass', u, p, kind, to: m, P, plan, pLane, pRecv });
+    if (u > this.bestU) this.bestU = u;
   }
 
   // Velocity to put the ball at P. Returns { vx, vy, vz, t } or null if out of range.
@@ -791,7 +802,7 @@ export class MatchSim {
   }
 
   pass(e, o) {
-    const err = (TUNE.passErr + (100 - (o.kind === 'throw' ? 70 : e.r.pass)) * TUNE.passErrPer) * (1 + this.pressureOn(e) * 0.6)
+    const err = Math.max(0.008, TUNE.passErr + (100 - (o.kind === 'throw' ? 70 : e.r.pass)) * TUNE.passErrPer) * (1 + this.pressureOn(e) * 0.6)
       * (o.kind === 'lofted' || o.kind === 'cross' ? 1.3 : 1);
     this.kick(e, o.plan.vx, o.plan.vy, o.plan.vz, err, o.kind);
     this.flight = { from: e, to: o.to, kind: o.kind };
@@ -833,7 +844,7 @@ export class MatchSim {
     const dx = gx - e.x, dy = aimY - e.y, dd = hyp(dx, dy);
     const T = dd / (speed * 0.93);
     const vz = (aimZ - 0.1 + 0.5 * 9.81 * T * T) / T;
-    const err = (TUNE.shotErr + (100 - skill) * TUNE.shotErrPer) * (1 + press * 0.8) * (1 + Math.max(0, speed - 24) * 0.02) * (freeKick ? 1.3 : 1) * (penalty ? 0.55 : 1);
+    const err = (TUNE.shotErr + (100 - skill) * TUNE.shotErrPer) * (1 + press * 0.8) * (1 + Math.max(0, speed - 24) * 0.02) * (freeKick ? 1.3 : 1) * (penalty ? 0.55 : 1) * (1 + Math.max(0, d - 12) * 0.04);
     b.z = 0.1;
     this.kick(e, (dx / dd) * speed, (dy / dd) * speed, vz, err, penalty ? 'penalty' : 'shot');
     b.vz *= 1 + this.rng.gauss(0, 0.12);
@@ -901,8 +912,11 @@ export class MatchSim {
     if (hands) return this.keeperTouch(e, v, d);
     if (z > 1.3 || (z > 0.9 && this.flight?.to !== e)) return this.header(e, v);
     const intended = this.flight?.to === e;
+    const passer = this.flight?.from;
+    const weight = intended && passer ? (passer.r.pass - 60) * 0.004 : 0; // a well-weighted pass is easier to take
+    const reading = this.flight && passer && passer.side !== e.side ? (e.r.awr - 60) * 0.006 : 0; // defenders who read it
     const diff = v / (9 + e.r.touch * 0.12) + (z > 0.9 ? 0.25 : 0);
-    const pC = clamp(TUNE.ctrlBase - TUNE.ctrlSlope * diff + (intended ? 0.08 : 0), 0.04, 0.98);
+    const pC = clamp(TUNE.ctrlBase - TUNE.ctrlSlope * diff + (intended ? 0.08 : 0) + weight + reading, 0.04, 0.98);
     if (this.rng.chance(pC)) return this.gainBall(e, diff);
     if (z < Math.min(1.7, e.height + 0.3) || this.rng.chance(0.5)) return this.deflect(e, 0.25 + this.rng.next() * 0.35);
     e.touchCD = this.t + 0.35; // swung and missed
@@ -1078,7 +1092,7 @@ export class MatchSim {
     // synergies: Ground (both ways), Bug (teammates close by), Rock (carrier resists)
     const near = Math.min(3, this.live(this.side(o)).filter((m) => m !== o && dist(m, c) < 3).length);
     const syn = (o.mods.grounded || 0) - (c.mods.grounded || 0) + (o.mods.swarm || 0) * near - (c.mods.sturdy || 0);
-    const score = (o.r.tackle - c.r.ret) * 0.035 + (o.r.mass - c.r.mass) * 0.008 - (c.r.agi - o.r.agi) * 0.01 + TUNE.tackleBias - (behind ? 0.6 : 0) + (front ? TUNE.frontBonus : 0) + syn
+    const score = (o.r.tackle - c.r.ret) * 0.02 + (o.r.mass - c.r.mass) * 0.004 - (c.r.agi - o.r.agi) * 0.007 + TUNE.tackleBias - (behind ? 0.6 : 0) + (front ? TUNE.frontBonus : 0) + syn
       + (0.5 - C.aggression) * TUNE.aggrLunge; // aggressive defenders lunge in; patient ones pick their moment
     this.contact(o, c);
     // Ghost: the tackle passes straight through
@@ -1331,6 +1345,23 @@ export class MatchSim {
   }
 }
 
+// Ball positions along a planned kick every 0.15 s (ground: rolling friction in closed form;
+// air: ballistic, ignoring drag). Written into PX/PY/PZ/PT; returns the number of samples.
+const PX = new Float64Array(32), PY = new Float64Array(32), PZ = new Float64Array(32), PT = new Float64Array(32);
+function pathSamples(e, plan, z0, until) {
+  const v = hyp(plan.vx, plan.vy) || 1e-6, ux = plan.vx / v, uy = plan.vy / v;
+  const n = Math.min(32, Math.ceil(until / 0.15));
+  const air = plan.vz > 0;
+  const k = BALL.mu / BALL.c, c = BALL.c, stop = v / c - k * Math.log((v + k) / k) / c;
+  for (let i = 0; i < n; i++) {
+    const t = (i + 1) * 0.15;
+    let s, z = 0;
+    if (air) { s = v * t; z = Math.max(0, z0 + plan.vz * t - 4.905 * t * t); }
+    else s = Math.min(stop, ((v + k) * (1 - Math.exp(-c * t))) / c - k * t);
+    PX[i] = e.x + ux * s; PY[i] = e.y + uy * s; PZ[i] = z; PT[i] = t;
+  }
+  return n;
+}
 // Distance from point (px, py) to segment (ax, ay)-(bx, by).
 function segDist(px, py, ax, ay, bx, by) {
   const dx = bx - ax, dy = by - ay, l2 = dx * dx + dy * dy;

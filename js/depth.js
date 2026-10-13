@@ -19,7 +19,7 @@ export class TeamDepth {
     this.cards = {};
     for (const s of [...STARTERS, ...BENCH]) {
       const c = parseCard(team.roster[s.key], s.key);
-      const card = buildCard(c.mon, c.pos, { id: `${team.id}-${s.key}`, teamId: team.id, slot: s.key });
+      const card = buildCard(c.mon, c.pos, { id: `${team.id}-${s.key}`, teamId: team.id, slot: s.key, bonus: team.bonus?.[s.key] });
       this.cards[s.key] = card;
       registry[card.id] = card;
     }

@@ -16,6 +16,12 @@ export function runMatches(jobs, { threads = Math.max(1, availableParallelism() 
   return new Promise((resolve, reject) => {
     const results = new Array(jobs.length);
     let next = 0, done = 0, live = 0;
+    // watchdog: report any match that runs far longer than normal (a stuck simulation)
+    const running = new Map();
+    const dog = setInterval(() => {
+      for (const [w, r] of running) if (Date.now() - r.t > 30000 && !r.told) { r.told = true; console.error(`
+!! slow match: job ${r.i} seed ${jobs[r.i].seed} ${jobs[r.i].home.id} vs ${jobs[r.i].away.id} ${JSON.stringify(jobs[r.i].home.bonus || jobs[r.i].away.bonus || '')}`); }
+    }, 5000);
     const n = Math.min(threads, jobs.length);
     if (!n) return resolve(results);
     for (let w = 0; w < n; w++) {
@@ -24,11 +30,12 @@ export function runMatches(jobs, { threads = Math.max(1, availableParallelism() 
       const feed = () => {
         if (next >= jobs.length) { worker.postMessage(null); return; }
         const i = next++;
+        running.set(worker, { i, t: Date.now() });
         worker.postMessage({ i, job: jobs[i] });
       };
       worker.on('message', ({ i, res }) => { results[i] = res; done++; onProgress?.(done, jobs.length); feed(); });
       worker.on('error', reject);
-      worker.on('exit', () => { if (--live === 0) resolve(results); });
+      worker.on('exit', () => { running.delete(worker); if (--live === 0) { clearInterval(dog); resolve(results); } });
       feed();
     }
   });
