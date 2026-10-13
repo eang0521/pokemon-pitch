@@ -42,6 +42,8 @@
       <span class="vs">vs</span>
       <div class="slot" id="slot-away"><span class="slot-label">Away</span><span class="slot-name">Select a team</span></div>
       <div class="setup-actions">
+ <label class="seed" title="Rare injuries knock a player out of the match; the coach has to sub them off"><input id="opt-injuries" type="checkbox" checked /> Injuries</label>
+        <label class="seed" title="A draw at full time goes to a penalty shootout"><input id="opt-knockout" type="checkbox" /> Knockout</label>
         <label class="seed">Seed <input id="seed" type="number" min="1" max="999999999" placeholder="random" /></label>
         <button id="btn-random" type="button" class="ghost">Random</button>
         <button id="btn-start" type="button" class="primary" disabled>Kick off</button>
@@ -101,10 +103,12 @@
       <nav class="tabs" role="tablist">
         <button role="tab" data-tab="pbp" class="on" type="button">Play-by-play</button>
         <button role="tab" data-tab="box" type="button">Stats</button>
+        <button role="tab" data-tab="players" type="button">Players</button>
         <button role="tab" data-tab="roster" type="button">Lineups</button>
       </nav>
       <div class="tab-body" id="tab-pbp"></div>
       <div class="tab-body hidden" id="tab-box"></div>
+      <div class="tab-body hidden" id="tab-players"></div>
       <div class="tab-body hidden" id="tab-roster"></div>
     </aside>
   </main>

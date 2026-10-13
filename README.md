@@ -2,7 +2,7 @@
 
 A static, browser-only 7-a-side soccer simulation where every player is a Pokémon card. It's a sibling of Pokémon Gridiron (the football sim) and shares its architecture and look: vanilla ES modules, no build step, no backend, hosted on GitHub Pages.
 
-> **Status: milestone 3 of 6.** Cards, the match engine, and the match screen (pitch, controls, play-by-play, stats, replays) are done. Coach AI, fatigue and subs, and type synergies are next. The 8 regional teams are provisional (auto-built from each region's Pokédex) until milestone 5.
+> **Status: milestone 4 of 6.** Cards, the match engine, the match screen, coach AI, fatigue and substitutions, type synergies, injuries, shootouts and the stats tabs are done. The 8 regional teams (hand-picked), team picker, team builder and share codes are next. Until then the regional teams are provisional, auto-built from each region's Pokédex.
 
 ## Cards
 Every card is a **Pokémon at a position**: Lucario GK and Lucario FWD are different cards. All 1,025 Pokémon can play all 4 positions. A card's ratings come from the Pokémon's six base stats, and each stat means something different at each position:
@@ -34,7 +34,8 @@ Pick a home and an away team and kick off, or open a link like `?home=kanto&away
 - **Camera:** follows the ball like a broadcast, or shows the full pitch (button, or press C).
 - **Controls:** play/pause (Space, or tap the pitch on a phone), speed ½×–4× (1× runs three seconds of match time per real second, so a match takes about 7 minutes), Sim to half, Sim to end, full screen (F).
 - **Replays and highlights:** every shot, goal and card in the play-by-play has a ▶ to watch it again. **Highlights** plays every goal, red card, woodwork and big save so far, and the final whistle offers the reel.
-- **Tabs:** play-by-play (optionally every pass), stats (possession, shots, on target, xG, passes and completion, tackles, interceptions, saves, corners, fouls, cards, plus a player table), and lineups. Tap or hover a player on the pitch for their card.
+- **Tabs:** play-by-play (optionally every pass), team stats (possession, shots, on target, xG, passes and completion, tackles, interceptions, saves, corners, fouls, cards), players (a match rating out of 10 for everyone who played, the box score, and the player of the match), and lineups (a live depth chart: who's on, everyone's energy, the bench, active synergies, and what the coach is doing). Tap or hover a player on the pitch for their card.
+- **Options:** Injuries (on by default) and Knockout (a draw goes to a penalty shootout). Links carry them too: `&ko=1`, `&inj=0`.
 - The match runs in a Web Worker, so the page stays smooth even during a sim; if workers aren't available it runs on the page.
 
 ## The match engine
@@ -48,18 +49,64 @@ A match is two 10-minute halves on a 60 × 40 m pitch with 5 × 2 m goals and 9 
 - **Keepers** position on the line from ball to goal and come out to narrow the angle. On a shot they react (Reflexes), then move and dive, with reach from height and a dive that stretches over time. Handling decides catch or parry, and a parry can be tipped behind for a corner. They also claim crosses (Composure) and distribute by hand or foot.
 - **Every event is logged** for the play-by-play: passes, shots, saves, tackles, interceptions, fouls, cards, set pieces and goals. The match also keeps team and player stats (possession, shots, on target, xG, passes and completion, tackles, saves, fouls, cards, corners).
 
-Tuning constants live in `TUNE` in `js/sim/matchSim.js`. The xG model is fitted to the sim's own shots with `tools/xg-fit.mjs`. Current league averages (60 matches, `node tools/sim-test.mjs 60`):
+Tuning constants live in `TUNE` in `js/sim/matchSim.js`. The xG model is fitted to the sim's own shots with `tools/xg-fit.mjs`. Current league averages (40 matches, `node tools/sim-test.mjs 40`):
 
 | | per match |
 |---|---|
-| Goals | 6.7 (xG 5.4) |
-| Shots / on target | 39 / 55% |
-| Save % | 71% |
-| Passes / completion | 199 / 80% |
-| Fouls / yellow / red | 11 / 1.9 / 0.2 |
-| Penalties | 0.4 (76% scored) |
-| Corners | 4.8 |
-| Home / draw / away | 37% / 13% / 50% |
+| Goals | 6.3 (xG 5.2) |
+| Shots / on target | 41 / 53% |
+| Save % | 74% |
+| Passes / completion | 202 / 79% |
+| Fouls / yellow / red | 10 / 1.6 / 0.1 |
+| Penalties | 0.2 (75% scored) |
+| Corners | 4.3 |
+| Substitutions | about 6 per team (rolling) |
+| Home / draw / away | 45% / 15% / 40% |
+
+## Fatigue and substitutions
+HP is stamina. Energy drains every step, more the closer a player runs to top speed, and stamina stretches it (a keeper barely tires). Below 75% energy, ratings fade (down to 82% of normal at 45% energy). Everyone gets a little back at half time.
+
+Substitutions are rolling, as in most small-sided football. At a stoppage, the coach swaps a tired starter for a fresher bench player when the change is worth it (effective OVR = OVR × fatigue, with a penalty for playing out of position), at most two at a time. Players recover on the bench and can come back on. Keepers only swap with keepers. A typical team makes four or five changes a match.
+
+**Injuries** (optional) are rare: a hard tackle or foul can hurt the carrier, who plays on at 60% until the next stoppage and then has to come off. If there's nobody left on the bench, the team plays short. A red card can never be replaced.
+
+## Coaches
+Every team has a coach with six tendencies (0 to 1): **tempo** (how quickly the ball moves), **press** (how high and hard they press), **width**, **directness** (forward passes and long balls over recycling), **shooting range**, and **aggression** in the tackle (more turnovers, more fouls). Presets: Balanced, Possession, Counter-Attack, High Press, Long Ball, Park the Bus, Wing Play.
+
+During the match coaches adjust:
+- **To the score and the clock.** In the last ten minutes, a team chasing the game presses higher, speeds up, goes more direct, shoots from further out and pushes everyone up. A team protecting a lead drops deeper and slows the game down.
+- **To what's working.** Coaches remember the last six minutes. If balls in behind create more shots than short passing, they go more direct (and vice versa). Crosses that cause trouble mean more width, and long shots that never go in mean working it closer. If the press keeps getting played through, they drop off.
+
+The play-by-play notes each change of approach, and the lineups tab shows the coach's current settings.
+
+## Type synergies
+Count each type among the 7 players a team has on the pitch (dual types count for both). With **2 / 4 / 6** of a type, the synergy reaches tier I / II / III, and every Pokémon of that type gets its effect. Substitutions and red cards switch them on and off.
+
+| Type | Synergy | Effect |
+|---|---|---|
+| Normal | Adaptable | No weak spots: below-average base stats are pulled up toward the Pokémon's own average |
+| Fighting | Brawler | +Attack (tackling, shot power, distribution) |
+| Steel | Iron | +Defense (strength, ball retention, hold-up play, handling) |
+| Psychic | Vision | +Sp. Atk (passing vision, finishing, keeper positioning) |
+| Fairy | Grace | +Sp. Def (first touch, awareness, movement, composure) |
+| Electric | Charge | +Speed (pace) |
+| Dragon | Outrage | Clutch: every rating rises in the last five minutes of a close match and in shootouts |
+| Fire | Burst | Faster acceleration |
+| Water | Flow | Keep speed through cuts and turns |
+| Grass | Photosynthesis | A ratings boost that builds to full time, and slower tiring |
+| Ice | Chill | Opponents they tackle or barge into are briefly slowed |
+| Poison | Toxic | Opponents they tackle or barge into lose extra energy |
+| Ground | Grounded | Win more ground duels: better tackling, harder to tackle |
+| Flying | Reach | Aerial reach: more headers won, keepers reach higher |
+| Bug | Swarm | Stronger tackles for each teammate close by |
+| Rock | Sturdy | Not knocked off the ball |
+| Ghost | Phase | Chance that tackles on them pass straight through |
+| Dark | Feint | Opponents react late to their passes and shots |
+
+Magnitudes live in `SYNERGY_VALUES` in `js/synergy.js`. `tools/synergy-calibrate.mjs` plays each team against an identical copy with one synergy forced to a tier, so every type can be tuned to about the same win-rate edge.
+
+## Penalty shootouts
+In a knockout match, a draw goes to penalties: five each, then sudden death, all at the same end. Every kick is played out by the sim. The keeper guesses a side (Composure against the taker's Composure), and the taker places it with Finishing and Composure. Takers go in order of their shooting, and the keeper takes last.
 
 ## Project layout
 
@@ -77,7 +124,10 @@ js/match.js           match: clock, halves, score, restarts, stats, play-by-play
 js/sim/matchSim.js    the agent simulation (decisions, movement, duels, keepers, set pieces)
 js/sim/ball.js        ball physics, prediction, kick planning
 js/sim/pitch.js       pitch geometry
-js/depth.js           a team in a match: cards, slots on the pitch, energy
+js/depth.js           a team in a match: cards, slots on the pitch, energy, substitutions
+js/coach.js           in-game coaching: score/clock adjustments and learning what works
+js/synergy.js         type synergy definitions, tiers and tuned magnitudes
+js/rating.js          player match ratings
 js/data/teams.js      the 8 regional AI teams (generated by tools/build-teams.mjs for now)
 js/data/coaches.js    coach tendency presets
 js/ratings.js         cards: base stats -> position traits, OVR
@@ -113,6 +163,9 @@ node tools/sim-test.mjs 8 0       # ...plus the play-by-play of match #0
 node tools/trace-match.mjs 1 0 40 kanto johto 10   # seed, from/to seconds, teams, ticks per line
 node tools/xg-fit.mjs 50          # fit the xG model to the sim's shots
 node tools/random-rosters.mjs 30  # random teams from the whole Pokédex: crashes, extremes, upsets
+node tools/fatigue-report.mjs 12  # energy at full time by position and stamina, subs, injuries
+node tools/synergy-calibrate.mjs 160 all 2   # win-rate edge of every type synergy (all CPU cores)
+node tools/coach-test.mjs 200     # adapting vs frozen coaches: comebacks, late shots, preset records
 node tools/build-teams.mjs        # regenerate the provisional regional teams
 node tools/ratings-report.mjs 8   # OVR spread per position, stat weights, top cards
 node tools/fetch-pokemon.mjs      # refresh the card database from pokemondb.net

@@ -39,13 +39,19 @@ export function createEngine() {
     return {
       score: [...m.score], half: m.half, clock: m.clock, final: m.final,
       stats: JSON.parse(JSON.stringify(m.stats)), log, logFrom, players,
-      sides: m.sim.sides.map((S) => ({
-        dir: S.dir,
-        onField: Object.fromEntries(S.ents.map((e) => [e.slot, e.id])),
-        sentOff: S.ents.filter((e) => e.sentOff).map((e) => e.id),
-        flex: S.depth.flex,
-      })),
-      energy: Object.assign({}, ...m.depth.map((d) => d.energy)),
+      sides: m.sim.sides.map((S, i) => {
+        const D = m.depth[i];
+        const energy = { ...D.energy };
+        for (const e of S.ents) energy[e.id] = e.energy;
+        return {
+          dir: S.dir,
+          onField: Object.fromEntries(S.ents.map((e) => [e.slot, e.id])),
+          sentOff: [...D.sentOff], injured: [...D.injured], energy,
+          synergy: S.synergy, flex: D.flex, subs: D.subs,
+          coach: { mood: D.coach.mood, eff: { ...D.coach.eff } },
+        };
+      }),
+      pens: m.shootout ? [...m.shootout.score] : null,
     };
   }
 

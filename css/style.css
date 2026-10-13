@@ -552,3 +552,15 @@ table.st.cmp td { font-size: 12.5px; padding: 5px; }
   .sb-clock { font-size: 17px; }
   .stage { height: calc(100svh - 120px); }
 }
+/* milestone 4: ratings, depth chart, shootouts */
+.rtg { display: inline-block; min-width: 30px; text-align: center; color: #fff; font-weight: 800; border-radius: 4px; padding: 1px 4px; }
+tr.potm-row td { background: rgba(255, 203, 5, .07); }
+.final .fpens { font-family: var(--display); font-size: clamp(16px, 3vw, 24px); color: var(--accent); }
+.final .potm { color: var(--text); }
+.sb-team .pts .pens { font-size: 15px; color: var(--accent); margin-left: 3px; vertical-align: middle; }
+.coach-box { background: var(--panel2); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; margin: 6px 0; }
+.coach-box .meters { display: grid; grid-template-columns: auto 1fr auto 1fr; gap: 3px 8px; margin-top: 5px; font-size: 11px; color: var(--muted); align-items: center; }
+.coach-box .mood { color: var(--accent); font-weight: 700; }
+.pbp-item.card .txt { color: #ffa198; font-weight: 600; }
+.pbp-item.sub .txt { font-size: 12px; }
+.team-card .sets { min-height: 22px; flex-direction: row; flex-wrap: wrap; gap: 0; align-items: center; }

@@ -7,7 +7,10 @@ import { PitchRenderer, kitsFor } from './render.js';
 import { parseCard, formationOf } from './roster.js';
 import { POS_NAMES } from './ratings.js';
 import { HALF_SECS } from './sim/pitch.js';
-import { $, $$, esc, typeChips, spriteUrl } from './ui.js';
+import { $, $$, esc, typeChips, spriteUrl, synergyChips } from './ui.js';
+import { matchRating } from './rating.js';
+import { teamSynergies } from './synergy.js';
+import { fatigueMult } from './depth.js';
 import { settings } from './storage.js';
 
 const PLAYBACK = 3; // 1× speed = three seconds of match time per real second (a match takes ~7 minutes)
@@ -66,10 +69,16 @@ function teamCardHtml(t) {
     <div class="info">
       <div class="tname">${esc(t.city)} ${esc(t.name)}</div>
       <div class="coach">${esc(c.name)} · ${esc(c.style)} · ${formationOf(t.roster).name}</div>
+      <div class="sets">${synergyChips(...Object.values(teamSyn(t)), { compact: true, onlyActive: true }) || '<span class="muted small">No synergies</span>'}</div>
       <div class="meters">${meter('Tempo', c.tempo)}${meter('Press', c.press)}${meter('Direct', c.directness)}${meter('Width', c.width)}</div>
       <div class="card-foot"><span class="pick"></span></div>
     </div>
   </div>`;
+}
+function teamSyn(t) {
+  const cards = ['GK', 'DEF1', 'DEF2', 'MID1', 'MID2', 'FWD', 'FLEX'].map((k) => POKEMON[parseCard(t.roster[k], k).mon]);
+  const { counts, active } = teamSynergies(cards);
+  return { counts, active };
 }
 function pickTeam(id) {
   if (sel.home === id) sel.home = null;
@@ -104,6 +113,11 @@ $('#btn-start').addEventListener('click', () => {
   const seed = Number($('#seed').value) || Math.floor(Math.random() * 1e9);
   startMatch(findTeam(sel.home), findTeam(sel.away), seed);
 });
+for (const [id, key, d] of [['#opt-injuries', 'injuries', true], ['#opt-knockout', 'knockout', false]]) {
+  $(id).checked = settings.get(key, d);
+  $(id).addEventListener('change', (e) => settings.set(key, e.target.checked));
+}
+const matchOptions = () => ({ injuries: $('#opt-injuries').checked, knockout: $('#opt-knockout').checked });
 
 // ==========================================================================
 // Match controller. The match runs in a Web Worker (js/worker.js); the page keeps a
@@ -116,8 +130,9 @@ const ctl = {
 };
 window.__pps = ctl;
 
-function startMatch(home, away, seed) {
+function startMatch(home, away, seed, options = matchOptions()) {
   if (!home || !away) return;
+  ctl.options = options;
   ctl.client?.terminate();
   Object.assign(ctl, { game: null, cur: null, ft: 0, hold: 0, queue: [], requested: 0, noMore: false, finalState: null, history: [], replay: null, shown: 0, simming: false, finished: false, lastCaption: null });
   showScreen('game');
@@ -129,10 +144,10 @@ function startMatch(home, away, seed) {
   ctl.renderer.spriteStyle = ctl.opts.sprites;
   ctl.renderer.view = ctl.opts.camera;
   syncCamBtn();
-  history.replaceState(null, '', `?home=${home.id}&away=${away.id}&seed=${seed}`);
+  history.replaceState(null, '', `?home=${home.id}&away=${away.id}&seed=${seed}${options.knockout ? '&ko=1' : ''}${options.injuries ? '' : '&inj=0'}`);
   $('#lastplay').innerHTML = '<span class="muted">Setting up the match…</span>';
   ctl.client = new EngineClient(onEngineMessage);
-  ctl.client.send({ type: 'new', home, away, seed });
+  ctl.client.send({ type: 'new', home, away, seed, options });
   setPlaying(false);
 }
 
@@ -227,6 +242,8 @@ function advance(dt) {
     catchUpLog(Infinity);
     renderPanels();
     if (rec.goal) { showToast('GOAL!'); ctl.hold = 2.4; }
+    else if (rec.kick) ctl.hold = 1.2;
+    else if (rec.halfEnd === 2 && !rec.final) { showToast('Penalties!'); ctl.hold = 2; }
     else if (rec.halfEnd === 1) { showToast('Half time', true); ctl.hold = 1.6; }
     loadNext();
   }
@@ -236,7 +253,7 @@ function advance(dt) {
 function catchUpLog(upto = nowElapsed()) {
   const g = ctl.game, log = g.log;
   let changed = false;
-  while (ctl.shown < log.length && (upto === Infinity ? log[ctl.shown].rec <= ctl.cur.id : elapsedOf(log[ctl.shown]) <= upto + 0.05 && log[ctl.shown].rec <= ctl.cur.id)) {
+  while (ctl.shown < log.length && (upto === Infinity ? log[ctl.shown].rec <= ctl.cur.id : log[ctl.shown].half < 3 && elapsedOf(log[ctl.shown]) <= upto + 0.05 && log[ctl.shown].rec <= ctl.cur.id)) {
     const l = log[ctl.shown++];
     changed = true;
     if (l.minor) continue;
@@ -245,6 +262,8 @@ function catchUpLog(upto = nowElapsed()) {
     else if (l.type === 'shotEnd' && l.result === 'saved' && l.xg >= 0.15) showToast('Great save!', true);
     else if (l.type === 'card' && l.card === 'red') showToast('Red card!', true);
     else if (l.type === 'penalty') showToast('Penalty!', true);
+    else if (l.type === 'pen') showToast(l.scored ? 'Scored!' : 'Missed!', true);
+    else if (l.type === 'injury') showToast('Injury', true);
   }
   if (changed) { renderScorebug(); renderPBP(); }
 }
@@ -317,19 +336,23 @@ function onFinal() {
   ctl.shown = g.log.length;
   renderScorebug(); renderPBP(); renderPanels();
   const [h, a] = g.score;
-  const winner = h === a ? null : g.teams[h > a ? 0 : 1];
+  const pens = g.pens;
+  const winner = h !== a ? g.teams[h > a ? 0 : 1] : pens ? g.teams[pens[0] > pens[1] ? 0 : 1] : null;
+  const potm = playersRated(g)[0];
   const scorers = g.log.filter((l) => l.type === 'goal').map((l) => `${clockText(elapsedOf(l))} ${l.text.replace(/^GOAL! /, '').replace(/\. [A-Z]{2,3} \d+–\d+ [A-Z]{2,3}$/, '')}`);
   const hi = highlightItems(), nHi = hi.length ? hi[hi.length - 1].m + 1 : 0;
-  $('#lastplay').innerHTML = `<span class="lp-dd">20:00</span>Full time. ${esc(g.teams[0].abbr)} ${h}–${a} ${esc(g.teams[1].abbr)}`;
+  $('#lastplay').innerHTML = `<span class="lp-dd">20:00</span>Full time. ${esc(g.teams[0].abbr)} ${h}–${a} ${esc(g.teams[1].abbr)}${pens ? ` (${pens[0]}–${pens[1]} on penalties)` : ''}`;
   const el = $('#final');
   el.innerHTML = `<h3>${winner ? `${esc(winner.city)} ${esc(winner.name)} win!` : "It's a draw"}</h3>
     <div class="fscore">${g.teams[0].abbr} ${h} — ${a} ${g.teams[1].abbr}</div>
+    ${pens ? `<div class="fpens">${pens[0]}–${pens[1]} on penalties</div>` : ''}
+    ${potm ? `<div class="potm">Player of the match: <b>${esc(potm.p.name)}</b> (${esc(g.teams.find((t) => t.id === potm.p.teamId).abbr)}) · ${potm.r.toFixed(1)}</div>` : ''}
     <div class="stars">${scorers.map(esc).join('<br>') || 'No goals.'}</div>
     <div class="final-btns">
       ${nHi ? `<button class="primary" id="btn-fhi" type="button">▶ Watch highlights (${nHi})</button>` : ''}
       <button id="btn-rematch" type="button">Rematch (new seed)</button><button id="btn-box" type="button">View stats</button></div>`;
   el.classList.remove('hidden');
-  $('#btn-rematch').onclick = () => startMatch(g.teams[0], g.teams[1], Math.floor(Math.random() * 1e9));
+  $('#btn-rematch').onclick = () => startMatch(g.teams[0], g.teams[1], Math.floor(Math.random() * 1e9), ctl.options);
   $('#btn-box').onclick = () => { el.classList.add('hidden'); selectTab('box'); $('.panel').scrollIntoView({ behavior: 'smooth' }); };
   if (nHi) $('#btn-fhi').onclick = () => startReplay(highlightItems(), 'Highlights');
 }
@@ -532,6 +555,9 @@ function renderScorebug() {
   const score = [0, 0];
   for (const l of g.log.slice(0, ctl.shown)) if (l.type === 'goal') score[l.side]++;
   if (ctl.finished) { score[0] = g.score[0]; score[1] = g.score[1]; }
+  const pens = [0, 0];
+  let inPens = false;
+  for (const l of g.log.slice(0, ctl.shown)) if (l.type === 'pen') { inPens = true; if (l.scored) pens[l.side]++; }
   const side = (i) => {
     const t = g.teams[i];
     const star = POKEMON[parseCard(t.roster.FWD, 'FWD').mon];
@@ -539,7 +565,7 @@ function renderScorebug() {
     return `<div class="sb-team ${i === 0 ? 'away' : 'home'}" style="background:linear-gradient(${i === 0 ? '90deg' : '270deg'}, ${g.kits[t.id].main}55, transparent 70%)">
       <div class="logo" style="background:${g.kits[t.id].main}"><img src="${spriteUrl(star)}" alt="" referrerpolicy="no-referrer"></div>
       <div class="tn"><div class="city">${esc(t.city)}</div><div class="nick"><span class="full">${esc(t.name)}</span><span class="short">${esc(t.abbr)}</span></div><div class="to">${'<i class="red"></i>'.repeat(reds)}</div></div>
-      <div class="pts">${score[i]}</div>
+      <div class="pts">${score[i]}${inPens ? `<small class="pens">(${pens[i]})</small>` : ''}</div>
       <span class="poss hidden"></span>
     </div>`;
   };
@@ -555,7 +581,8 @@ function renderClock(force = false) {
   let t = rec?.frames ? nowElapsed(rec, ft) : 0, half = rec?.half || 1;
   if (ctl.finished && !ctl.replay) t = 2 * HALF_SECS;
   else if (rec?.halfEnd && !ctl.replay && ft >= recDur(rec) - 0.05) t = rec.halfEnd * HALF_SECS;
-  const label = ctl.finished && !ctl.replay ? 'FULL TIME' : ctl.replay ? 'REPLAY' : rec?.halfEnd === 1 && ctl.ft >= recDur(rec) - 0.05 ? 'HALF TIME' : half === 1 ? '1ST HALF' : '2ND HALF';
+  if (half === 3) t = 2 * HALF_SECS;
+  const label = ctl.finished && !ctl.replay ? 'FULL TIME' : ctl.replay ? 'REPLAY' : half === 3 ? 'PENALTIES' : rec?.halfEnd === 1 && ctl.ft >= recDur(rec) - 0.05 ? 'HALF TIME' : half === 1 ? '1ST HALF' : '2ND HALF';
   const text = `${clockText(t)}|${label}`;
   if (!force && text === lastClockText) return updatePoss(rec, ft);
   lastClockText = text;
@@ -576,7 +603,7 @@ function updatePoss(rec, ft) {
 $$('.tabs button').forEach((b) => b.addEventListener('click', () => selectTab(b.dataset.tab)));
 function selectTab(tab) {
   $$('.tabs button').forEach((x) => x.classList.toggle('on', x.dataset.tab === tab));
-  for (const t of ['pbp', 'box', 'roster']) $(`#tab-${t}`).classList.toggle('hidden', t !== tab);
+  for (const t of ['pbp', 'box', 'players', 'roster']) $(`#tab-${t}`).classList.toggle('hidden', t !== tab);
   settings.set('tab', tab);
 }
 selectTab(settings.get('tab', 'pbp'));
@@ -586,6 +613,7 @@ function renderPanels() {
   if (!g) return;
   renderPBP();
   renderBox(g);
+  renderPlayers(g);
   renderRosters(g);
 }
 
@@ -596,12 +624,12 @@ function renderPBP() {
   const recent = items.slice(-160).reverse();
   let html = '', lastHalf = null;
   for (const l of recent) {
-    if (l.half !== lastHalf) { html += `<div class="pbp-q">${l.half === 1 ? '1st half' : '2nd half'}</div>`; lastHalf = l.half; }
+    if (l.half !== lastHalf) { html += `<div class="pbp-q">${['1st half', '2nd half', 'Penalty shootout'][l.half - 1]}</div>`; lastHalf = l.half; }
     const team = l.side >= 0 ? g.teams[l.side] : null;
-    const cls = l.type === 'goal' ? 'score' : l.type === 'card' ? 'card' : l.minor ? 'note' : '';
+    const cls = l.type === 'goal' || (l.type === 'pen' && l.scored) ? 'score' : l.type === 'card' || l.type === 'injury' ? 'card' : l.type === 'sub' || l.type === 'coach' ? 'note sub' : l.minor ? 'note' : '';
     const canReplay = ['goal', 'shot', 'woodwork', 'shotEnd', 'card', 'penalty'].includes(l.type) && ctl.history[l.rec];
     html += `<div class="pbp-item ${cls}"><span class="stripe" style="background:${team ? g.kits[team.id].main : 'transparent'}"></span><div>
-      <div class="meta">${clockText(elapsedOf(l))}${team ? ` · ${team.abbr}` : ''}</div>
+      <div class="meta">${l.half === 3 ? 'Penalties' : clockText(elapsedOf(l))}${team ? ` · ${team.abbr}` : ''}</div>
       <div class="txt">${esc(l.text)}${canReplay ? ` <button type="button" class="replay-btn" data-i="${g.log.indexOf(l)}" title="Watch it again">▶</button>` : ''}</div></div></div>`;
   }
   $('#tab-pbp').innerHTML = html || '<p class="muted">Kick-off is coming up.</p>';
@@ -630,35 +658,63 @@ function renderBox(g) {
     ['Yellow / red', `${T[0].yellow} / ${T[0].red}`, `${T[1].yellow} / ${T[1].red}`],
   ];
   const head = `<tr><th></th><th>${esc(g.teams[0].abbr)}</th><th>${esc(g.teams[1].abbr)}</th></tr>`;
-  const players = (ti) => {
-    const ids = Object.keys(g.players).filter((id) => g.players[id].teamId === g.teams[ti].id && (g.stats.players[id]?.touches || g.stats.players[id]?.saves));
-    if (!ids.length) return '';
-    const P = g.stats.players;
-    ids.sort((a, b) => (P[b].goals * 10 + P[b].assists * 5 + P[b].touches * 0.05) - (P[a].goals * 10 + P[a].assists * 5 + P[a].touches * 0.05));
-    return `<div class="box-team"><span class="chip" style="background:${g.kits[g.teams[ti].id].main}"></span>${esc(g.teams[ti].city)} ${esc(g.teams[ti].name)}</div>
-      <table class="st"><tr><th>Player</th><th>G</th><th>A</th><th>Sh</th><th>Pass</th><th>Tkl</th><th>Sv</th></tr>
-      ${ids.map((id) => { const s = P[id], p = g.players[id]; return `<tr><td class="pl"><img src="${spriteUrl(p)}" alt="" loading="lazy" referrerpolicy="no-referrer">${esc(p.name)} <span class="muted">${p.pos}</span></td><td>${s.goals || ''}</td><td>${s.assists || ''}</td><td>${s.shots ? `${s.sot}/${s.shots}` : ''}</td><td>${s.passes ? `${s.cmp}/${s.passes}` : ''}</td><td>${s.tackles ? `${s.tacklesWon}/${s.tackles}` : ''}</td><td>${s.saves || ''}</td></tr>`; }).join('')}</table>`;
-  };
-  $('#tab-box').innerHTML = `<table class="st cmp">${head}${rows.map((r) => `<tr><td>${r[0]}</td><td>${r[1]}</td><td>${r[2]}</td></tr>`).join('')}</table>${players(0)}${players(1)}
+  $('#tab-box').innerHTML = `<table class="st cmp">${head}${rows.map((r) => `<tr><td>${r[0]}</td><td>${r[1]}</td><td>${r[2]}</td></tr>`).join('')}</table>
     <p class="muted small">Stats update as each passage of play finishes.</p>`;
 }
 
+// Everyone who played, best match rating first.
+function playersRated(g) {
+  const out = [];
+  for (const id in g.players) {
+    const r = matchRating(g.players[id], g.stats.players[id]);
+    if (r != null) out.push({ id, p: g.players[id], r, s: g.stats.players[id] });
+  }
+  return out.sort((a, b) => b.r - a.r);
+}
+function renderPlayers(g) {
+  const all = playersRated(g);
+  const potm = ctl.finished ? all[0]?.id : null;
+  const table = (ti) => {
+    const list = all.filter((x) => x.p.teamId === g.teams[ti].id);
+    if (!list.length) return '';
+    return `<div class="box-team"><span class="chip" style="background:${g.kits[g.teams[ti].id].main}"></span>${esc(g.teams[ti].city)} ${esc(g.teams[ti].name)}</div>
+      <table class="st"><tr><th>Player</th><th title="Match rating">Rtg</th><th>G</th><th>A</th><th title="On target / shots">Sh</th><th title="Completed / attempted">Pass</th><th title="Won / attempted">Tkl</th><th>Sv</th></tr>
+      ${list.map(({ id, p, r, s }) => `<tr${id === potm ? ' class="potm-row"' : ''}><td class="pl"><img src="${spriteUrl(p)}" alt="" loading="lazy" referrerpolicy="no-referrer">${esc(p.name)} <span class="muted">${p.pos}</span>${id === potm ? ' ⭐' : ''}</td>
+        <td><span class="rtg" style="background:${rtgColor(r)}">${r.toFixed(1)}</span></td><td>${s.goals || ''}</td><td>${s.assists || ''}</td><td>${s.shots ? `${s.sot}/${s.shots}` : ''}</td><td>${s.passes ? `${s.cmp}/${s.passes}` : ''}</td><td>${s.tackles ? `${s.tacklesWon}/${s.tackles}` : ''}</td><td>${s.saves || ''}</td></tr>`).join('')}</table>`;
+  };
+  $('#tab-players').innerHTML = (table(0) + table(1)) || '<p class="muted">No one has touched the ball yet.</p>';
+}
+const rtgColor = (r) => (r >= 8 ? '#2e7d32' : r >= 7 ? '#558b2f' : r >= 6 ? '#8d7a1a' : r >= 5 ? '#a65b1a' : '#9a2a2a');
+
+// Live depth chart: who's on, energy, the bench, synergies and what the coach is doing.
 function renderRosters(g) {
   const team = (ti) => {
-    const t = g.teams[ti], side = g.sides[ti] || { onField: {}, sentOff: [] };
+    const t = g.teams[ti], side = g.sides[ti];
+    if (!side) return '';
+    const energyBar = (id) => {
+      const e = side.energy?.[id] ?? 100;
+      const col = e >= 75 ? 'var(--good)' : e >= 55 ? '#d29922' : 'var(--bad)';
+      return `<span class="en" title="${Math.round(e)}% energy${e < 75 ? `, ratings ×${fatigueMult(e).toFixed(2)}` : ''}"><i style="width:${Math.round(e)}%;background:${col}"></i></span> <span class="muted small">${Math.round(e)}%</span>`;
+    };
+    const status = (id) => (side.sentOff.includes(id) ? '<span class="inj">🟥 Sent off</span>' : side.injured.includes(id) ? '<span class="inj">🚑 Injured</span>' : energyBar(id));
     const row = (id, label) => {
       const p = g.players[id];
       if (!p) return '';
-      const off = side.sentOff?.includes(id);
-      return `<tr class="${off ? 'dim' : ''}"><td class="pl"><img src="${spriteUrl(p)}" alt="" loading="lazy" referrerpolicy="no-referrer"><div><b>${esc(p.name)}</b> <span class="muted">${label}</span><br>${typeChips(p.types)}</div></td><td class="ovr">${p.ovr}</td><td>${off ? '<span class="inj">🟥 Sent off</span>' : ''}</td></tr>`;
+      return `<tr class="${side.sentOff.includes(id) ? 'dim' : ''}"><td class="pl"><img src="${spriteUrl(p)}" alt="" loading="lazy" referrerpolicy="no-referrer"><div><b>${esc(p.name)}</b> <span class="muted">${label}</span><br>${typeChips(p.types)}</div></td><td class="ovr">${p.ovr}</td><td class="best">${status(id)}</td></tr>`;
     };
     const onIds = Object.entries(side.onField);
     const bench = Object.keys(g.players).filter((id) => g.players[id].teamId === t.id && !onIds.some(([, x]) => x === id));
-    return `<div class="box-team"><span class="chip" style="background:${g.kits[t.id].main}"></span>${esc(t.city)} ${esc(t.name)} <span class="muted small">${formationOf(t.roster).name} · ${esc(t.coach.style)}</span></div>
-      <table class="st"><tr><th>On the pitch</th><th>OVR</th><th></th></tr>${onIds.map(([slot, id]) => row(id, `${g.players[id]?.pos}${slot === 'FLEX' ? ' (FLEX)' : ''}`)).join('')}
+    const c = side.coach?.eff || t.coach;
+    const mood = { chasing: 'Chasing the game', protecting: 'Protecting the lead' }[side.coach?.mood] || 'Normal shape';
+    const meter = (label, v) => `<span>${label}</span><div class="meter"><span style="width:${Math.round(v * 100)}%"></span></div>`;
+    return `<div class="box-team"><span class="chip" style="background:${g.kits[t.id].main}"></span>${esc(t.city)} ${esc(t.name)} <span class="muted small">${formationOf(t.roster).name}</span></div>
+      <div class="b-syn">${synergyChips(side.synergy?.counts, side.synergy?.active || {}, { compact: true, onlyActive: true }) || '<span class="muted small">No active synergies</span>'}</div>
+      <div class="coach-box"><div class="small"><b>${esc(t.coach.name)}</b> · ${esc(t.coach.style)} · <span class="mood">${mood}</span>${side.subs ? ` · ${side.subs} sub${side.subs > 1 ? 's' : ''}` : ''}</div>
+        <div class="meters">${meter('Tempo', c.tempo)}${meter('Press', c.press)}${meter('Direct', c.directness)}${meter('Width', c.width)}${meter('Shooting', c.shootRange)}${meter('Aggression', c.aggression)}</div></div>
+      <table class="st"><tr><th>On the pitch</th><th>OVR</th><th>Energy</th></tr>${onIds.map(([slot, id]) => row(id, `${g.players[id]?.pos}${slot === 'FLEX' ? ' (FLEX)' : ''}`)).join('')}
       <tr><th>Bench</th><th></th><th></th></tr>${bench.map((id) => row(id, g.players[id].pos)).join('')}</table>`;
   };
-  $('#tab-roster').innerHTML = team(0) + team(1);
+  $('#tab-roster').innerHTML = team(0) + team(1) + '<p class="muted small">Energy drains with running (Stamina = HP). Below 75% ratings fade; coaches rotate tired players at stoppages and rested ones can come back on.</p>';
 }
 
 // ==========================================================================
@@ -669,6 +725,6 @@ const params = new URLSearchParams(location.search);
 const qHome = findTeam(params.get('home')), qAway = findTeam(params.get('away'));
 if (qHome && qAway && qHome !== qAway) {
   sel.home = qHome.id; sel.away = qAway.id; syncSetup();
-  startMatch(qHome, qAway, Number(params.get('seed')) || Math.floor(Math.random() * 1e9));
+  startMatch(qHome, qAway, Number(params.get('seed')) || Math.floor(Math.random() * 1e9), { knockout: params.get('ko') === '1', injuries: params.get('inj') !== '0' });
 } else showScreen(location.hash === '#cards' ? 'guide' : settings.get('screen', 'setup'));
 

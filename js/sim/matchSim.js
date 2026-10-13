@@ -12,7 +12,10 @@ import {
   L, W, GOAL_W, GOAL_H, GOAL_Y0, GOAL_Y1, POST_R, BALL_R, BOX_D, BOX_W, GA_D, PEN_SPOT, CIRCLE_R, DT,
   clamp, hyp, dist, sigmoid, inBox, goalAngle,
 } from './pitch.js';
-import { stepBall, predict, planGround, planLofted, groundTime } from './ball.js';
+import { stepBall, predict, planGround, planLofted } from './ball.js';
+import { cardRatings } from '../ratings.js';
+import { teamSynergies, playerEffects } from '../synergy.js';
+import { fatigueMult } from '../depth.js';
 
 // Tunable constants (tools/sim-test.mjs is the reference for what they produce).
 export const TUNE = {
@@ -22,6 +25,8 @@ export const TUNE = {
   dribbleSlow: 0.7,
   dribbleVal: 0.6, // dribbling gains less than a pass to the same spot (slower, defenders recover) // top speed with the ball at your feet
   jog: 0.62, // share of top speed for shape movement
+  // energy (per second): base + run * (speed / top speed)^3, scaled by stamina
+  drainBase: 0.034, drainRun: 0.21, gkDrain: 0.25, benchRegen: 0.12,
   // decisions
   noise: 0.009, // utility noise for a 0-vision player (scaled down by vision)
   possVal: 0.04, // value of simply having the ball (lost on a turnover)
@@ -39,6 +44,8 @@ export const TUNE = {
   tackleRange: 1.15,
   block: 0.45, blockRange: 1.6, // a defender in the way when a pass or shot is struck
   tackleBias: 0.7,
+  pressCost: 4, // extra sprint energy for pressers, per unit of press
+  aggrLunge: 0.9, // tackle-success logit per unit of aggression below 0.5
   frontTry: 1.8, frontBonus: 0.35, // a defender squared up in front goes in more often and wins more // logit offset on tackle success
   foulBase: 0.014, foulAggr: 0.026, foulBehind: 0.06,
   yellow: 0.08, red: 0.004,
@@ -67,13 +74,15 @@ export class MatchSim {
     this.rng = rng;
     this.emit = onEvent;
     this.t = 0;
-    this.sides = sides.map((s, i) => ({ ...s, i, coach: s.depth.coach, ents: [] }));
+    this.sides = sides.map((s, i) => ({ ...s, i, coach: s.depth.coach.eff, ents: [] }));
+    this.ctx = { progress: 0, clutch: false }; // set by the match: share of the match played, clutch time
     this.ents = [];
     for (const S of this.sides) {
       for (const [slot, card] of Object.entries(S.depth.onField)) {
         const e = this.makeEnt(card, slot, S.i);
         S.ents.push(e); this.ents.push(e);
       }
+      this.refreshSide(S);
     }
     this.ball = { x: L / 2, y: W / 2, z: 0, vx: 0, vy: 0, vz: 0, px: L / 2, py: W / 2, pz: 0, owner: null, inHands: false, lastTouch: null, touchT: 0, kick: null };
     this.phase = 'set';
@@ -88,23 +97,62 @@ export class MatchSim {
 
   // ------------------------------------------------------------------ entities
   makeEnt(card, slot, side) {
-    const r = card.ratings;
     const e = {
-      id: card.id, card, slot, side, role: card.pos, r, name: card.name,
-      x: 0, y: 0, vx: 0, vy: 0, tx: 0, ty: 0, tspd: TUNE.jog,
-      maxSpd: TUNE.spdBase + r.pace * TUNE.spdPer,
-      accel: TUNE.accBase + r.agi * TUNE.accPer,
-      height: card.height,
-      headZ: Math.min(3.1, 0.75 + clamp(card.height, 0.2, 4) * 0.75),
-      gkReach: TUNE.gkReach + r.reach * TUNE.gkReachPer,
-      gkDive: TUNE.gkDive + r.refl * TUNE.gkDivePer,
-      gkTop: TUNE.gkTop + r.reach * TUNE.gkTopPer,
-      nextThink: 0, nextDecide: 0, touchCD: 0, tackleCD: 0, stunUntil: 0,
+      slot, side, x: 0, y: 0, vx: 0, vy: 0, tx: 0, ty: 0, tspd: TUNE.jog,
+      nextThink: 0, nextDecide: 0, touchCD: 0, tackleCD: 0, stunUntil: 0, slowUntil: 0,
       run: null, mark: null, diving: false, holdUntil: 0, posErr: 0, posErrT: 0,
-      sentOff: false, restricted: null, lastFrom: null, lastFromT: -99,
+      sentOff: false, restricted: null, lastFrom: null, lastFromT: -99, mods: {}, boost: null,
     };
     e.idx = this.ents.length;
+    this.setCard(e, card, side);
     return e;
+  }
+  // Put a card in this entity (kickoff, or a substitution).
+  setCard(e, card, side = e.side) {
+    Object.assign(e, { id: card.id, card, role: card.pos, name: card.name, height: card.height });
+    e.energy = this.sides[side]?.depth.energy[card.id] ?? 100;
+    e.injured = this.sides[side]?.depth.injured.has(card.id) || false;
+    e.lastFrom = null; e.yellow = false; e.run = null; e.mark = null;
+    e.r0 = card.ratings;
+    this.rateEnt(e);
+  }
+  // Type synergies for everyone a side has on the pitch (after kickoff, subs and red cards).
+  refreshSide(S) {
+    const live = this.live(S);
+    S.synergy = teamSynergies(live.map((e) => e.card));
+    // tools/synergy-calibrate.mjs: force one synergy onto chosen slots
+    const ov = S.depth.synOverride;
+    if (ov) S.synergy.active = { ...S.synergy.active, [ov.type]: ov.tier };
+    for (const e of S.ents) {
+      const card = ov && ov.slots.includes(e.slot) && !e.card.types.includes(ov.type) ? { ...e.card, types: [...e.card.types, ov.type] } : e.card;
+      const { stat, mods } = playerEffects(card, S.synergy.active);
+      e.mods = mods;
+      e.r0 = Object.keys(stat).length ? cardRatings(e.card.slug, e.card.pos, stat) : e.card.ratings;
+      this.rateEnt(e);
+    }
+  }
+  // Live ratings: synergy-boosted card ratings x fatigue, Grass growth, Dragon clutch, injury.
+  rateEnt(e) {
+    let m = fatigueMult(e.energy);
+    if (e.mods.growth) m *= 1 + e.mods.growth * this.ctx.progress;
+    if (e.mods.clutch && this.ctx.clutch) m *= 1 + e.mods.clutch;
+    if (e.injured) m *= 0.6;
+    const r = {};
+    for (const k in e.r0) r[k] = k === 'mass' || k === 'reach' ? e.r0[k] : Math.max(20, Math.round(e.r0[k] * m));
+    e.r = r;
+    e.maxSpd = TUNE.spdBase + r.pace * TUNE.spdPer;
+    e.accel = (TUNE.accBase + r.agi * TUNE.accPer) * (1 + (e.mods.burst || 0));
+    e.headZ = Math.min(3.3, 0.75 + clamp(e.height, 0.2, 4) * 0.75 + (e.mods.reach || 0));
+    e.gkReach = TUNE.gkReach + r.reach * TUNE.gkReachPer;
+    e.gkDive = TUNE.gkDive + r.refl * TUNE.gkDivePer;
+    e.gkTop = TUNE.gkTop + r.reach * TUNE.gkTopPer + (e.mods.reach || 0);
+  }
+  // Swap a substitute into e's slot: the old player walks off, the new one comes on at halfway.
+  substitute(e, card) {
+    this.setCard(e, card);
+    e.x = L / 2 + (e.side === 0 ? -2 : 2); e.y = -0.5; e.vx = e.vy = 0;
+    this.side(e).alive = null;
+    this.refreshSide(this.side(e));
   }
   side(e) { return this.sides[e.side]; }
   opp(e) { return this.sides[1 - e.side]; }
@@ -121,6 +169,7 @@ export class MatchSim {
   step() {
     this.t += DT;
     const b = this.ball;
+    if (this.t >= (this.rateT || 0)) { this.rateT = this.t + 2; for (const e of this.ents) if (!e.sentOff) this.rateEnt(e); }
     if (this.phase === 'set') this.setTick();
     else if (this.phase === 'play') this.playTick();
     for (const e of this.ents) this.integrate(e);
@@ -139,19 +188,30 @@ export class MatchSim {
   steer(e, tx, ty, frac) {
     let top = e.maxSpd * frac;
     if (this.t < e.stunUntil) top *= 0.35;
+    if (this.t < e.slowUntil) top *= 0.75; // Ice: chilled
     if (this.ball.owner === e && !this.ball.inHands) top *= TUNE.dribbleSlow + e.r.ret * 0.0008;
     const dx = tx - e.x, dy = ty - e.y, d = hyp(dx, dy);
     const want = Math.min(top, d * 2.5);
     const dvx = (d > 1e-6 ? (dx / d) * want : 0) - e.vx;
     const dvy = (d > 1e-6 ? (dy / d) * want : 0) - e.vy;
     const dv = hyp(dvx, dvy);
-    const lim = e.accel * DT * (e.diving ? 3 : 1);
+    let lim = e.accel * DT * (e.diving ? 3 : 1);
+    if (e.mods.flow) {
+      // Water: keep speed through cuts and turns
+      const sp = hyp(e.vx, e.vy);
+      if (sp > 2 && d > 1e-6 && (e.vx * dx + e.vy * dy) < 0.6 * sp * d) lim *= 1 + e.mods.flow;
+    }
     const k = dv > lim ? lim / dv : 1;
     e.vx += dvx * k; e.vy += dvy * k;
   }
   integrate(e) {
     if (e.sentOff) { e.vx = e.vy = 0; return; }
     if (!this.diveOverride(e)) this.steer(e, e.tx, e.ty, e.tspd);
+    // energy: running costs more the closer to top speed, stamina stretches it
+    const f = Math.min(1.2, hyp(e.vx, e.vy) / (e.maxSpd || 1));
+    const stam = (130 - e.r0.stm) / 80;
+    const pressing = this.ball.owner && this.ball.owner.side !== e.side && (this.chaser?.[e.side] === e || this.chaser2?.[e.side] === e);
+    e.energy = Math.max(0, e.energy - (TUNE.drainBase + TUNE.drainRun * f * f * f * (pressing ? 1 + TUNE.pressCost * this.side(e).coach.press : 1)) * stam * (1 - (e.mods.regen || 0)) * (e.slot === 'GK' ? TUNE.gkDrain : 1) * DT);
     // players stay on the field of play (throw-in takers may stand just over the touchline)
     e.x = clamp(e.x + e.vx * DT, 0.15, L - 0.15);
     e.y = clamp(e.y + e.vy * DT, -1, W + 1);
@@ -269,7 +329,8 @@ export class MatchSim {
         const ballU = this.u(S.i, b.x);
         // a second man: high-pressing teams up the pitch, everyone when the ball is near their goal
         const nearGoal = hyp(b.x - this.ownX(S.i), b.y - W / 2) < 17;
-        if (ranked[1] && (nearGoal || press > 0.65 || (press > 0.35 && ballU > 0.55)) && ranked[1].t < 2.5) this.chaser2[S.i] = ranked[1].e;
+        // (pressing teams start their second man further up the pitch the more they press)
+        if (ranked[1] && (nearGoal || (ballU > 0.9 - press * 0.5)) && ranked[1].t < 2.5) this.chaser2[S.i] = ranked[1].e;
         continue;
       }
       let best = null, bt = Infinity;
@@ -346,6 +407,7 @@ export class MatchSim {
       if (e.role === 'DEF') u = Math.min(u, ballU - 0.04);
       else if (e.role !== 'FWD') u = Math.min(u, ballU + 0.05);
     }
+    u += (S.coach.mentality || 0) * 0.07;
     u = clamp(u, 0.06, e.role === 'DEF' ? 0.75 : 0.93);
     v = clamp(v, 0.04, 0.96);
     return { x: this.X(e.side, u), y: v * W };
@@ -442,7 +504,7 @@ export class MatchSim {
     e.diving = e.diving && !b.owner;
     // a shot coming at goal: react, then move (or dive) to the save point
     if (!b.owner && this.ballToGoal(e.side)) {
-      const react = Math.max(0.12, TUNE.gkReact - e.r.refl * TUNE.gkReactPer) + (e.guessWrong ? 0.4 : 0);
+      const react = Math.max(0.12, TUNE.gkReact - e.r.refl * TUNE.gkReactPer) + (e.guessWrong ? 0.4 : 0) + (b.misread || 0);
       if (this.t - b.touchT < react) return;
       const p = this.savePoint(e);
       if (p) {
@@ -717,7 +779,9 @@ export class MatchSim {
     let blocker = null;
     for (const o of this.live(this.opp(e))) {
       if (hyp(o.x - b.x, o.y - b.y) < TUNE.blockRange + 0.5) o.touchCD = Math.max(o.touchCD, this.t + 0.2);
+      if (e.mods.misread && o.slot !== 'GK') o.touchCD = Math.max(o.touchCD, this.t + e.mods.misread); // Dark: they read it late
     }
+    b.misread = e.mods.misread || 0;
     if (pBlock > 0 && this.rng.chance(pBlock)) {
       blocker = this.live(this.opp(e)).filter((o) => hyp(o.x - e.x, o.y - e.y) < TUNE.blockRange).sort((p, q) => dist(p, e) - dist(q, e))[0];
     }
@@ -857,6 +921,7 @@ export class MatchSim {
     } else if (prev && prev.side !== e.side && this.poss !== e.side && !this.openShot) this.emit('recovery', { by: e });
     if (this.openShot) this.resolveShot(e.slot === 'GK' && e.side !== this.openShot.side ? 'saved' : e.side !== this.openShot.side ? 'blocked' : 'rebound', e);
     b.owner = e; b.inHands = inHands; b.vx = b.vy = b.vz = 0; b.z = inHands ? 1 : 0;
+    b.misread = 0;
     b.lastTouch = e; b.touchT = this.t;
     this.flight = null;
     this.poss = e.side;
@@ -875,6 +940,7 @@ export class MatchSim {
     b.vx = vx * c - vy * s; b.vy = vx * s + vy * c;
     b.vz = Math.abs(b.vz) * 0.3 + this.rng.range(0, 2.5);
     b.lastTouch = e; b.touchT = this.t;
+    b.misread = 0;
     e.touchCD = this.t + 0.3;
     if (this.openShot && e.side !== this.openShot.side) this.resolveShot('blocked', e);
     if (this.openPass) { this.emit('passEnd', { pass: this.openPass, by: e, complete: false }); this.openPass = null; }
@@ -886,7 +952,7 @@ export class MatchSim {
   header(e, v) {
     const b = this.ball, S = this.side(e);
     const gx = this.goalX(e.side), own = this.ownX(e.side);
-    const win = clamp(0.55 + e.r.str * 0.004 - v * 0.012, 0.2, 0.95);
+    const win = clamp(0.55 + e.r.str * 0.004 - v * 0.012 + (e.mods.reach || 0) * 0.4, 0.2, 0.95);
     if (!this.rng.chance(win)) return this.deflect(e, 0.3);
     if (this.openPass && this.openPass.by.side !== e.side) { this.emit('passEnd', { pass: this.openPass, by: e, complete: false }); this.openPass = null; }
     if (this.openShot && e.side !== this.openShot.side) this.resolveShot('blocked', e);
@@ -993,8 +1059,11 @@ export class MatchSim {
       // a defender squared up in front of the carrier can lunge from a little further away
       const gxs = this.goalX(c.side) - c.x, gys = W / 2 - c.y, gs = hyp(gxs, gys) || 1;
       const front = ((o.x - c.x) * gxs + (o.y - c.y) * gys) / gs > 0.3;
-      if (dist(o, b) > TUNE.tackleRange + (front ? 0.35 : 0)) continue;
-      if (!this.rng.chance(TUNE.tackleTry * (0.6 + C.aggression * 0.8) * (front ? TUNE.frontTry : 1))) continue;
+      const db = dist(o, b);
+      if (db > TUNE.tackleRange + (front ? 0.35 : 0)) continue;
+      // one man goes in at a time: the presser; the second man covers unless the ball is right at his feet
+      if (this.chaser?.[o.side] !== o && db > 0.8) continue;
+      if (!this.rng.chance(TUNE.tackleTry * (0.7 + C.aggression * 0.6) * (front ? TUNE.frontTry : 1))) continue;
       this.tackle(o, c, C, front);
       if (b.owner !== c || this.phase !== 'play') return;
     }
@@ -1006,12 +1075,20 @@ export class MatchSim {
     const gx = this.goalX(c.side);
     const fx = gx - c.x, fy = W / 2 - c.y, f = hyp(fx, fy) || 1;
     const behind = ((o.x - c.x) * fx + (o.y - c.y) * fy) / f > 0.35;
-    const score = (o.r.tackle - c.r.ret) * 0.035 + (o.r.mass - c.r.mass) * 0.008 - (c.r.agi - o.r.agi) * 0.01 + TUNE.tackleBias - (behind ? 0.6 : 0) + (front ? TUNE.frontBonus : 0);
+    // synergies: Ground (both ways), Bug (teammates close by), Rock (carrier resists)
+    const near = Math.min(3, this.live(this.side(o)).filter((m) => m !== o && dist(m, c) < 3).length);
+    const syn = (o.mods.grounded || 0) - (c.mods.grounded || 0) + (o.mods.swarm || 0) * near - (c.mods.sturdy || 0);
+    const score = (o.r.tackle - c.r.ret) * 0.035 + (o.r.mass - c.r.mass) * 0.008 - (c.r.agi - o.r.agi) * 0.01 + TUNE.tackleBias - (behind ? 0.6 : 0) + (front ? TUNE.frontBonus : 0) + syn
+      + (0.5 - C.aggression) * TUNE.aggrLunge; // aggressive defenders lunge in; patient ones pick their moment
+    this.contact(o, c);
+    // Ghost: the tackle passes straight through
+    if (c.mods.phase && this.rng.chance(c.mods.phase)) { this.emit('tackle', { by: o, on: c, won: false, phase: true }); o.stunUntil = this.t + 0.55; return; }
     const pWin = sigmoid(score);
     const pFoul = clamp(TUNE.foulBase + C.aggression * TUNE.foulAggr + (behind ? TUNE.foulBehind : 0) + (1 - pWin) * 0.05, 0.01, 0.5);
-    if (this.rng.chance(pFoul)) return this.foul(o, c, behind);
+    if (this.rng.chance(pFoul)) { this.maybeInjure(c, 0.012); return this.foul(o, c, behind); }
     if (this.rng.chance(pWin)) {
       this.emit('tackle', { by: o, on: c, won: true });
+      this.maybeInjure(c, 0.0012);
       if (this.rng.chance(0.55)) { this.poss = o.side; this.gainBall(o, 0.3); return; }
       // poked loose
       b.owner = null;
@@ -1022,9 +1099,22 @@ export class MatchSim {
       this.pred = null;
       return;
     }
-    // beaten
+    // beaten (a lunging tackle leaves the defender on the floor longer)
     this.emit('tackle', { by: o, on: c, won: false });
-    o.stunUntil = this.t + 0.55;
+    this.contact(c, o);
+    o.stunUntil = this.t + 0.4 + C.aggression * 0.5;
+  }
+  // Ice and Poison: whoever a and b barge into pays for it.
+  contact(a, b) {
+    if (a.mods.chill) b.slowUntil = Math.max(b.slowUntil, this.t + a.mods.chill);
+    if (a.mods.toxic) b.energy = Math.max(0, b.energy - a.mods.toxic);
+  }
+  maybeInjure(e, p) {
+    if (!this.injuries || e.injured || !this.rng.chance(p)) return;
+    e.injured = true;
+    this.side(e).depth.injured.add(e.id);
+    this.rateEnt(e);
+    this.emit('injury', { by: e });
   }
   foul(o, c, behind) {
     const b = this.ball;
@@ -1035,7 +1125,7 @@ export class MatchSim {
     let card = null;
     const r = this.rng.next();
     if (r < TUNE.red + (through ? 0.04 : 0)) card = 'red';
-    else if (r < TUNE.red + TUNE.yellow + (behind ? 0.1 : 0) + (through ? 0.25 : 0)) card = 'yellow';
+    else if (r < TUNE.red + TUNE.yellow + (behind ? 0.1 : 0) + (through ? 0.25 : 0) + this.side(o).coach.aggression * 0.08) card = 'yellow';
     if (card === 'yellow' && o.yellow) card = 'second';
     this.emit('foul', { by: o, on: c, pen, card, x: c.x, y: c.y });
     if (card === 'yellow') o.yellow = true;
@@ -1052,6 +1142,7 @@ export class MatchSim {
     this.side(e).alive = null;
     e.x = L / 2; e.y = -2.5; e.vx = e.vy = 0;
     this.side(e).depth.sentOff.add(e.id);
+    this.refreshSide(this.side(e));
   }
 
   // ------------------------------------------------------------------ out of play / goals

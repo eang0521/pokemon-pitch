@@ -3,7 +3,7 @@ import { createEngine, unpackFrames } from './engine.js';
 import { HALF_SECS } from './sim/pitch.js';
 
 export class MatchView {
-  constructor(teams, seed) { this.teams = teams; this.seed = seed; this.players = {}; this.log = []; this.sides = []; this.energy = {}; }
+  constructor(teams, seed) { this.teams = teams; this.seed = seed; this.players = {}; this.log = []; this.sides = []; this.pens = null; }
   // The log arrives with every record and is revealed by playback time; the rest of the
   // state (stats, who's on the pitch) is applied once that record has been played.
   addLog(state) {
@@ -14,7 +14,7 @@ export class MatchView {
   apply(state) {
     for (const id in state.players) this.players[id] = state.players[id];
     this.stats = state.stats; this.score = state.score; this.half = state.half; this.clock = state.clock; this.final = state.final;
-    this.sides = state.sides; this.energy = state.energy;
+    this.sides = state.sides; this.pens = state.pens;
   }
   // seconds since kickoff (0..1200)
   get elapsed() { return (this.half - 1) * HALF_SECS + Math.min(this.clock, HALF_SECS); }
